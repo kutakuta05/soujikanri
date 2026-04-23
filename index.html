@@ -888,7 +888,13 @@ function displayRoute(result, props, start) {
         <div class="w-7 h-7 bg-emerald-500 text-white rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">${legIdx + 1}</div>
         <div class="flex-1 min-w-0">
           <p class="text-sm font-bold text-gray-800">${esc(p.name)}</p>
-          <p class="text-xs text-gray-400">${legIdx === 0 ? `出発地から` : `前の物件から`} 約${mins}分</p>
+          <p class="text-xs text-gray-400 mb-1">${legIdx === 0 ? `出発地から` : `前の物件から`} 約${mins}分</p>
+          ${p.autoLockCode ? `
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-amber-600 font-bold">🔒</span>
+            <span id="rlock-${p.id}" class="blur-code text-sm font-bold text-amber-700 tracking-wider">${esc(p.autoLockCode)}</span>
+            <button onclick="toggleRouteLock('${p.id}')" class="tap text-xs bg-amber-50 text-amber-600 px-2 py-0.5 rounded-lg font-bold active:bg-amber-100">表示</button>
+          </div>` : ''}
         </div>
       </div>
       ${legIdx < order.length - 1 ? '<div class="ml-3.5 border-l-2 border-dashed border-gray-200 h-3"></div>' : ''}`;
@@ -898,6 +904,18 @@ function displayRoute(result, props, start) {
   // 地図を表示してリサイズ（非表示状態だとサイズ計算がずれるため）
   google.maps.event.trigger(gMap, 'resize');
   document.getElementById('map').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function toggleRouteLock(id) {
+  const el  = document.getElementById(`rlock-${id}`);
+  const btn = el.nextElementSibling;
+  if (el.classList.contains('revealed')) {
+    el.classList.remove('revealed'); el.classList.add('blur-code');
+    btn.textContent = '表示';
+  } else {
+    el.classList.add('revealed'); el.classList.remove('blur-code');
+    btn.textContent = '隠す';
+  }
 }
 
 function openInMaps() {
