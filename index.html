@@ -801,7 +801,7 @@ function renderRoutePropList() {
   }
   list.innerHTML = ps.map(p => `
     <label class="flex items-center gap-3 bg-gray-50 rounded-xl px-3 py-3 cursor-pointer">
-      <input type="checkbox" id="chk-${p.id}" value="${p.id}" checked
+      <input type="checkbox" id="chk-${p.id}" value="${p.id}"
         class="w-5 h-5 accent-emerald-500 shrink-0" />
       <div class="flex-1 min-w-0">
         <p class="text-sm font-medium text-gray-800 truncate">${esc(p.name)}</p>
