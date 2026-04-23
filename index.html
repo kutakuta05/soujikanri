@@ -627,7 +627,7 @@ function previewImport(event) {
       const start = (rows.length > 0 && isNaN(parseFloat(rows[0][2]))) ? 1 : 0;
 
       state.importData = rows.slice(start)
-        .filter(r => String(r[0] || '').trim())
+        .filter(r => String(r[0] || '').trim() && String(r[1] || '').trim())
         .map(r => ({
           name:         String(r[0] || '').trim(),
           address:      String(r[1] || '').trim(),
