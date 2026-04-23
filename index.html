@@ -10,6 +10,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+  <script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBrnJ8aY-8H80BmQNu0Ib4nouPRUSdP9Tw&callback=initMap&language=ja"></script>
   <style>
     * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
     body { font-family: -apple-system, 'Hiragino Sans', 'Meiryo', sans-serif; overscroll-behavior: none; -webkit-overflow-scrolling: touch; }
@@ -235,6 +236,54 @@
     </div>
   </div>
 
+  <!-- ⑤ ルート計算 -->
+  <div id="screen-route" class="screen">
+    <p class="text-sm font-medium text-gray-500 mb-4">ルート計算</p>
+
+    <!-- 出発設定 -->
+    <div class="bg-white rounded-2xl shadow-sm p-4 mb-4">
+      <div class="mb-3">
+        <label class="text-xs text-gray-500 block mb-1">出発地点</label>
+        <input id="route-start" type="text" placeholder="住所を入力..."
+          class="w-full border border-gray-200 rounded-xl px-3 py-3 focus:outline-none focus:border-emerald-400" />
+      </div>
+      <div class="mb-4">
+        <label class="text-xs text-gray-500 block mb-1">出発時間</label>
+        <input id="route-time" type="time" value="09:00"
+          class="border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-emerald-400" />
+      </div>
+      <button onclick="calcRoute()"
+        class="tap w-full bg-emerald-500 text-white rounded-xl py-3 font-bold text-base active:bg-emerald-700">
+        🗺️ ルートを計算する
+      </button>
+    </div>
+
+    <!-- 含める物件 -->
+    <div class="bg-white rounded-2xl shadow-sm p-4 mb-4">
+      <div class="flex items-center justify-between mb-3">
+        <p class="text-sm font-bold text-gray-700">含める物件</p>
+        <button onclick="toggleAllProps()" class="text-xs text-emerald-500 font-bold">全選択/解除</button>
+      </div>
+      <div id="route-prop-list" class="space-y-2"></div>
+    </div>
+
+    <!-- 計算結果 -->
+    <div id="route-result" class="hidden">
+      <div id="map" class="w-full rounded-2xl overflow-hidden mb-4" style="height:260px;"></div>
+      <div class="bg-white rounded-2xl shadow-sm p-4 mb-4">
+        <div class="flex items-center justify-between mb-4">
+          <p class="text-sm font-bold text-gray-700">最適な訪問順序</p>
+          <span id="route-total" class="text-xs bg-emerald-100 text-emerald-600 px-2 py-1 rounded-full font-bold"></span>
+        </div>
+        <div id="route-order-list" class="space-y-1 mb-4"></div>
+        <button onclick="openInMaps()"
+          class="tap w-full bg-blue-500 text-white rounded-xl py-3 font-bold text-sm active:bg-blue-700">
+          📍 Googleマップで開く（ナビ開始）
+        </button>
+      </div>
+    </div>
+  </div>
+
 </main>
 
 <!-- ボトムナビ -->
@@ -250,6 +299,10 @@
   <button class="nav-btn tap flex-1 pt-2 pb-1 flex flex-col items-center gap-0.5" data-screen="import">
     <span class="nav-icon text-2xl text-gray-300">📥</span>
     <span class="nav-label text-xs text-gray-400">インポート</span>
+  </button>
+  <button class="nav-btn tap flex-1 pt-2 pb-1 flex flex-col items-center gap-0.5" data-screen="route">
+    <span class="nav-icon text-2xl text-gray-300">🗺️</span>
+    <span class="nav-label text-xs text-gray-400">ルート</span>
   </button>
   <button class="nav-btn tap flex-1 pt-2 pb-1 flex flex-col items-center gap-0.5" data-screen="settings">
     <span class="nav-icon text-2xl text-gray-300">⚙️</span>
@@ -724,6 +777,141 @@ async function saveSchedule() {
 }
 
 // ══════════════════════════════════════════════════════
+// Google Maps ルート計算
+// ══════════════════════════════════════════════════════
+let gMap = null, gRenderer = null, gRouteWaypoints = [];
+
+function initMap() {
+  gMap = new google.maps.Map(document.getElementById('map'), {
+    center: { lat: 34.6937, lng: 135.5023 }, // 大阪デフォルト
+    zoom: 12,
+    disableDefaultUI: true,
+    zoomControl: true,
+  });
+  gRenderer = new google.maps.DirectionsRenderer({ suppressMarkers: false });
+  gRenderer.setMap(gMap);
+}
+
+function renderRoutePropList() {
+  const ps  = state.properties;
+  const list = document.getElementById('route-prop-list');
+  if (ps.length === 0) {
+    list.innerHTML = '<p class="text-sm text-gray-400 text-center py-4">物件がありません。先にインポートしてください。</p>';
+    return;
+  }
+  list.innerHTML = ps.map(p => `
+    <label class="flex items-center gap-3 bg-gray-50 rounded-xl px-3 py-3 cursor-pointer">
+      <input type="checkbox" id="chk-${p.id}" value="${p.id}" checked
+        class="w-5 h-5 accent-emerald-500 shrink-0" />
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-medium text-gray-800 truncate">${esc(p.name)}</p>
+        <p class="text-xs text-gray-400 truncate">${esc(p.address)}</p>
+      </div>
+    </label>`).join('');
+}
+
+function toggleAllProps() {
+  const checkboxes = document.querySelectorAll('#route-prop-list input[type=checkbox]');
+  const allChecked = Array.from(checkboxes).every(c => c.checked);
+  checkboxes.forEach(c => c.checked = !allChecked);
+}
+
+async function calcRoute() {
+  const start = document.getElementById('route-start').value.trim();
+  if (!start) { alert('出発地点を入力してください。'); return; }
+
+  const selected = state.properties.filter(p => {
+    const chk = document.getElementById(`chk-${p.id}`);
+    return chk && chk.checked && p.address;
+  });
+  if (selected.length === 0) { alert('物件を1件以上選択してください。'); return; }
+
+  // Google Maps未読み込みチェック
+  if (!gMap) { alert('地図の読み込み中です。少し待ってから再試行してください。'); return; }
+
+  // 出発時間設定
+  const [h, m] = document.getElementById('route-time').value.split(':').map(Number);
+  const depTime = new Date();
+  depTime.setHours(h, m, 0, 0);
+  if (depTime < new Date()) depTime.setDate(depTime.getDate() + 1);
+
+  const btn = document.querySelector('[onclick="calcRoute()"]');
+  btn.textContent = '計算中...';
+  btn.disabled = true;
+
+  try {
+    const service = new google.maps.DirectionsService();
+    const result  = await service.route({
+      origin:              start,
+      destination:         start,
+      waypoints:           selected.map(p => ({ location: p.address, stopover: true })),
+      optimizeWaypoints:   true,
+      travelMode:          google.maps.TravelMode.DRIVING,
+      drivingOptions: {
+        departureTime: depTime,
+        trafficModel:  google.maps.TrafficModel.BEST_GUESS,
+      },
+    });
+    displayRoute(result, selected, start);
+  } catch(err) {
+    alert('ルート計算に失敗しました。住所が正しいか確認してください。');
+    console.error(err);
+  } finally {
+    btn.textContent = '🗺️ ルートを計算する';
+    btn.disabled = false;
+  }
+}
+
+function displayRoute(result, props, start) {
+  gRenderer.setDirections(result);
+
+  const route  = result.routes[0];
+  const order  = route.waypoint_order;
+  const legs   = route.legs;
+
+  // 合計時間
+  const totalMins = Math.round(
+    legs.reduce((s, l) => s + (l.duration_in_traffic?.value ?? l.duration.value), 0) / 60
+  );
+  document.getElementById('route-total').textContent = `合計 約${totalMins}分`;
+
+  // Googleマップ用URL保存
+  gRouteWaypoints = [start, ...order.map(i => props[i].address)];
+
+  // 訪問順リスト
+  document.getElementById('route-order-list').innerHTML = order.map((propIdx, legIdx) => {
+    const p    = props[propIdx];
+    const leg  = legs[legIdx];
+    const mins = Math.round((leg.duration_in_traffic?.value ?? leg.duration.value) / 60);
+    return `
+      <div class="flex items-start gap-3 py-1">
+        <div class="w-7 h-7 bg-emerald-500 text-white rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">${legIdx + 1}</div>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-bold text-gray-800">${esc(p.name)}</p>
+          <p class="text-xs text-gray-400">${legIdx === 0 ? `出発地から` : `前の物件から`} 約${mins}分</p>
+        </div>
+      </div>
+      ${legIdx < order.length - 1 ? '<div class="ml-3.5 border-l-2 border-dashed border-gray-200 h-3"></div>' : ''}`;
+  }).join('');
+
+  document.getElementById('route-result').classList.remove('hidden');
+  // 地図を表示してリサイズ（非表示状態だとサイズ計算がずれるため）
+  google.maps.event.trigger(gMap, 'resize');
+  document.getElementById('map').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function openInMaps() {
+  if (gRouteWaypoints.length < 2) return;
+  const origin  = encodeURIComponent(gRouteWaypoints[0]);
+  const dest    = encodeURIComponent(gRouteWaypoints[gRouteWaypoints.length - 1]);
+  const waypts  = gRouteWaypoints.slice(1, -1).map(w => encodeURIComponent(w)).join('|');
+  window.open(
+    `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}&waypoints=${waypts}&travelmode=driving`,
+    '_blank'
+  );
+}
+
+// ══════════════════════════════════════════════════════
 // ナビゲーション
 // ══════════════════════════════════════════════════════
 document.querySelectorAll('.nav-btn').forEach(btn => {
@@ -734,6 +922,12 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     document.getElementById('screen-' + btn.dataset.screen).classList.add('active');
     document.getElementById('scroll').scrollTop = 0;
     if (btn.dataset.screen === 'properties') renderProperties();
+    if (btn.dataset.screen === 'route') {
+      renderRoutePropList();
+      // スタッフの出発地点を自動セット
+      const me = state.staff.find(s => s.name === state.currentUser);
+      if (me?.defaultStart) document.getElementById('route-start').value = me.defaultStart;
+    }
   });
 });
 
