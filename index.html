@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="theme-color" content="#10b981" />
+  <title>掃除案件管理</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+  <style>
+    * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+    body { font-family: -apple-system, 'Hiragino Sans', 'Meiryo', sans-serif; overscroll-behavior: none; -webkit-overflow-scrolling: touch; }
+    .screen { display: none; }
+    .screen.active { display: block; }
+    .nav-btn.active .nav-icon { color: #10b981; }
+    .nav-btn.active .nav-label { color: #10b981; font-weight: 700; }
+    .tap { transition: transform 0.1s, opacity 0.1s; }
+    .tap:active { transform: scale(0.96); opacity: 0.8; }
+    header { padding-top: max(env(safe-area-inset-top), 12px); }
+    nav    { padding-bottom: max(env(safe-area-inset-bottom), 8px); }
+    input, select, textarea { font-size: 16px !important; }
+    .modal { display: none; position: fixed; inset: 0; z-index: 50; }
+    .modal.open { display: flex; }
+    .blur-code { filter: blur(6px); user-select: none; transition: filter 0.2s; }
+    .blur-code.revealed { filter: none; }
+    .card-in { animation: cardIn 0.2s ease; }
+    @keyframes cardIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<!-- ローディング画面 -->
+<div id="loading" class="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center gap-3">
+  <div class="text-5xl">🧹</div>
+  <p class="text-gray-400 text-sm">読み込み中...</p>
+</div>
+
+<!-- スタッフ選択モーダル -->
+<div id="modal-staff" class="modal flex-col items-center justify-center bg-black/50 px-4">
+  <div class="bg-white rounded-3xl p-6 w-full max-w-sm">
+    <h2 class="text-lg font-bold text-gray-800 mb-1">あなたは誰ですか？</h2>
+    <p class="text-sm text-gray-400 mb-5">名前を選択してください</p>
+    <div id="staff-select-list" class="space-y-2"></div>
+  </div>
+</div>
+
+<!-- 物件詳細モーダル -->
+<div id="modal-detail" class="modal flex-col bg-white overflow-y-auto">
+  <!-- 詳細ヘッダー -->
+  <div class="sticky top-0 bg-white border-b border-gray-100 px-4 flex items-center gap-3 z-10"
+       style="padding-top: max(env(safe-area-inset-top), 12px); padding-bottom: 12px;">
+    <button onclick="closeDetail()" class="tap w-10 h-10 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 text-xl shrink-0">←</button>
+    <h2 id="detail-name" class="font-bold text-gray-800 text-base flex-1 truncate"></h2>
+    <button id="btn-visited" onclick="toggleVisited()"
+      class="tap text-xs px-3 py-2 rounded-full font-bold shrink-0 bg-gray-100 text-gray-600 active:bg-emerald-100 active:text-emerald-600">
+      訪問済みにする
+    </button>
+  </div>
+
+  <div class="px-4 pt-4 pb-10 space-y-4">
+    <!-- 物件情報 -->
+    <div class="bg-gray-50 rounded-2xl p-4 space-y-2 text-sm">
+      <div class="flex gap-3">
+        <span class="text-gray-400 w-14 shrink-0">住所</span>
+        <span id="detail-address" class="text-gray-700"></span>
+      </div>
+      <div class="flex gap-3">
+        <span class="text-gray-400 w-14 shrink-0">訪問</span>
+        <span id="detail-visits" class="text-gray-700"></span>
+      </div>
+      <div id="row-fixed" class="hidden flex gap-3">
+        <span class="text-gray-400 w-14 shrink-0">固定</span>
+        <span id="detail-fixed" class="text-indigo-600 font-medium"></span>
+      </div>
+      <div id="row-gomi" class="hidden flex gap-3">
+        <span class="text-gray-400 w-14 shrink-0">ゴミ</span>
+        <span id="detail-gomi" class="text-gray-700"></span>
+      </div>
+    </div>
+
+    <!-- オートロック -->
+    <div id="lock-section" class="hidden bg-amber-50 rounded-2xl p-4">
+      <p class="text-xs text-amber-500 font-bold mb-2">🔒 オートロック番号</p>
+      <div class="flex items-center justify-between gap-3">
+        <p id="lock-code" class="blur-code text-3xl font-bold text-amber-800 tracking-widest"></p>
+        <button id="btn-lock" onclick="toggleLock()"
+          class="tap shrink-0 bg-amber-100 text-amber-700 text-xs px-4 py-2 rounded-xl font-bold active:bg-amber-200">
+          タップで表示
+        </button>
+      </div>
+    </div>
+
+    <!-- メモ -->
+    <div>
+      <p class="text-sm font-bold text-gray-600 mb-3">📝 メモ（全員にリアルタイム共有）</p>
+      <div id="memo-list" class="space-y-2 mb-3 min-h-8"></div>
+      <div class="flex gap-2">
+        <input id="memo-input" type="text" placeholder="メモを入力..."
+          class="flex-1 border border-gray-200 rounded-xl px-3 py-3 text-sm focus:outline-none focus:border-emerald-400" />
+        <button onclick="addMemo()"
+          class="tap bg-emerald-500 text-white rounded-xl px-4 font-bold text-sm active:bg-emerald-700 shrink-0">送信</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ヘッダー -->
+<header class="bg-white shadow-sm px-4 pb-3 flex items-center justify-between sticky top-0 z-10">
+  <h1 class="text-lg font-bold text-emerald-600">🧹 掃除案件管理</h1>
+  <button id="btn-user" onclick="openStaffModal()"
+    class="tap text-xs bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-full font-bold active:bg-emerald-100">
+    ？ 名前を選択
+  </button>
+</header>
+
+<!-- メインコンテンツ -->
+<main id="scroll" class="overflow-y-auto px-4 pt-4"
+      style="padding-bottom: calc(72px + max(env(safe-area-inset-bottom), 8px) + 16px);">
+
+  <!-- ① ホーム -->
+  <div id="screen-home" class="screen active">
+    <div class="flex items-center justify-between mb-3">
+      <p class="text-sm font-medium text-gray-500">今週の案件</p>
+      <span id="week-label" class="text-xs text-gray-400"></span>
+    </div>
+    <!-- 進捗 -->
+    <div class="bg-white rounded-2xl shadow-sm p-4 mb-4">
+      <div class="flex justify-between text-xs text-gray-500 mb-2">
+        <span>今週の進捗</span>
+        <span id="progress-text">0 / 0 件完了</span>
+      </div>
+      <div class="bg-gray-100 rounded-full h-2.5">
+        <div id="progress-bar" class="bg-emerald-500 h-2.5 rounded-full transition-all duration-500" style="width:0%"></div>
+      </div>
+    </div>
+    <div id="home-list" class="space-y-2"></div>
+    <div id="home-empty" class="hidden mt-20 text-center text-gray-300">
+      <p class="text-5xl mb-4">📋</p>
+      <p class="text-sm leading-relaxed">今週の案件がありません。<br/>「インポート」からExcelを読み込もう！</p>
+    </div>
+  </div>
+
+  <!-- ② 物件リスト -->
+  <div id="screen-properties" class="screen">
+    <input id="search-input" type="text" placeholder="物件名・住所で検索..."
+      oninput="renderProperties()"
+      class="w-full border border-gray-200 rounded-xl px-4 py-3 mb-4 focus:outline-none focus:border-emerald-400" />
+    <div id="prop-list" class="space-y-2"></div>
+    <div id="prop-empty" class="hidden mt-20 text-center text-gray-300">
+      <p class="text-5xl mb-4">🏢</p>
+      <p class="text-sm">物件が見つかりません</p>
+    </div>
+  </div>
+
+  <!-- ③ インポート -->
+  <div id="screen-import" class="screen">
+    <p class="text-sm font-medium text-gray-500 mb-4">ExcelまたはCSVを読み込む</p>
+
+    <div class="bg-white rounded-2xl shadow-sm p-4 mb-4 text-sm">
+      <p class="font-bold text-gray-700 mb-2">📊 Excelの列の並び順</p>
+      <div class="space-y-1 text-gray-500 text-xs">
+        <p>A列 — 物件名（必須）</p>
+        <p>B列 — 住所（必須）</p>
+        <p>C列 — 巡回頻度（週1回 / 週2回 など）</p>
+        <p>D列 — ゴミ（任意）</p>
+        <p>E列 — オートロック番号（任意）</p>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow-sm p-4 mb-4">
+      <p class="text-sm font-bold text-gray-700 mb-3">📎 ファイルを選択</p>
+      <input id="file-input" type="file" accept=".xlsx,.xls,.csv"
+        onchange="previewImport(event)"
+        class="w-full text-sm text-gray-500 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:bg-emerald-50 file:text-emerald-600 file:font-bold" />
+    </div>
+
+    <!-- プレビュー -->
+    <div id="import-preview" class="hidden bg-white rounded-2xl shadow-sm p-4 mb-4">
+      <p class="text-sm font-bold text-gray-700 mb-3">👀 プレビュー（<span id="preview-count">0</span>件）</p>
+      <div id="preview-list" class="space-y-2 max-h-64 overflow-y-auto mb-4"></div>
+      <button onclick="executeImport()"
+        class="tap w-full bg-emerald-500 text-white rounded-xl py-3 text-base font-bold active:bg-emerald-700">
+        ✅ インポート実行
+      </button>
+    </div>
+  </div>
+
+  <!-- ④ 設定 -->
+  <div id="screen-settings" class="screen">
+    <p class="text-sm font-medium text-gray-500 mb-4">スタッフ・スケジュール設定</p>
+
+    <!-- スタッフ -->
+    <div class="bg-white rounded-2xl shadow-sm p-4 mb-4">
+      <p class="text-sm font-bold text-gray-700 mb-3">👷 スタッフ（最大3名）</p>
+      <div id="staff-list" class="space-y-2 mb-3"></div>
+      <div class="space-y-2">
+        <input id="input-staff-name" type="text" placeholder="名前"
+          class="w-full border border-gray-200 rounded-xl px-3 py-3 focus:outline-none focus:border-emerald-400" />
+        <input id="input-staff-start" type="text" placeholder="出発地点（住所）"
+          class="w-full border border-gray-200 rounded-xl px-3 py-3 focus:outline-none focus:border-emerald-400" />
+        <button onclick="addStaff()"
+          class="tap w-full bg-emerald-500 text-white rounded-xl py-3 font-bold text-sm active:bg-emerald-700">
+          ＋ スタッフを追加
+        </button>
+      </div>
+    </div>
+
+    <!-- スケジュール制約 -->
+    <div class="bg-white rounded-2xl shadow-sm p-4 mb-4">
+      <p class="text-sm font-bold text-gray-700 mb-3">📅 スケジュール制約</p>
+      <div class="space-y-3">
+        <div>
+          <label class="text-xs text-gray-500 block mb-1">水曜の固定訪問時間</label>
+          <input id="input-wed" type="time" value="14:00"
+            class="border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-emerald-400" />
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 block mb-1">金曜の開始時間</label>
+          <input id="input-fri-start" type="time" value="05:30"
+            class="border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-emerald-400" />
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 block mb-1">金曜の終了時間</label>
+          <input id="input-fri-end" type="time" value="15:00"
+            class="border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-emerald-400" />
+        </div>
+        <button onclick="saveSchedule()"
+          class="tap w-full bg-gray-700 text-white rounded-xl py-3 font-bold text-sm active:bg-gray-900">
+          保存する
+        </button>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- ボトムナビ -->
+<nav class="fixed bottom-0 left-0 w-full bg-white border-t border-gray-100 flex z-10">
+  <button class="nav-btn active tap flex-1 pt-2 pb-1 flex flex-col items-center gap-0.5" data-screen="home">
+    <span class="nav-icon text-2xl text-gray-300">🏠</span>
+    <span class="nav-label text-xs text-gray-400">ホーム</span>
+  </button>
+  <button class="nav-btn tap flex-1 pt-2 pb-1 flex flex-col items-center gap-0.5" data-screen="properties">
+    <span class="nav-icon text-2xl text-gray-300">🏢</span>
+    <span class="nav-label text-xs text-gray-400">物件</span>
+  </button>
+  <button class="nav-btn tap flex-1 pt-2 pb-1 flex flex-col items-center gap-0.5" data-screen="import">
+    <span class="nav-icon text-2xl text-gray-300">📥</span>
+    <span class="nav-label text-xs text-gray-400">インポート</span>
+  </button>
+  <button class="nav-btn tap flex-1 pt-2 pb-1 flex flex-col items-center gap-0.5" data-screen="settings">
+    <span class="nav-icon text-2xl text-gray-300">⚙️</span>
+    <span class="nav-label text-xs text-gray-400">設定</span>
+  </button>
+</nav>
+
+<script>
+// ══════════════════════════════════════════════════════
+// Firebase 初期化
+// ══════════════════════════════════════════════════════
+firebase.initializeApp({
+  apiKey: "AIzaSyD-VbV7tWNfVDnGdXuR8f8hbQTlB2LI2pI",
+  authDomain: "soujikanri-b6ee9.firebaseapp.com",
+  projectId: "soujikanri-b6ee9",
+  storageBucket: "soujikanri-b6ee9.firebasestorage.app",
+  messagingSenderId: "853246001624",
+  appId: "1:853246001624:web:edfe70cc1d98d10f2fb2ad"
+});
+const db = firebase.firestore();
+
+// ══════════════════════════════════════════════════════
+// 状態管理
+// ══════════════════════════════════════════════════════
+const state = {
+  properties: [],       // 今週の物件一覧
+  staff: [],            // スタッフ一覧
+  currentUser: localStorage.getItem('currentUser') || null,
+  detailId: null,       // 詳細表示中の物件ID
+  memoUnsub: null,      // メモのリアルタイムリスナー解除関数
+  importData: [],       // インポートプレビューデータ
+};
+
+// ══════════════════════════════════════════════════════
+// ユーティリティ
+// ══════════════════════════════════════════════════════
+const esc = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';
+
+// 今週の月曜日を YYYY-MM-DD で返す
+function getMonday() {
+  const d = new Date();
+  const day = d.getDay(); // 0=日, 1=月 ...
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function formatTs(ts) {
+  if (!ts) return '';
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+// ══════════════════════════════════════════════════════
+// アプリ起動
+// ══════════════════════════════════════════════════════
+async function initApp() {
+  await loadStaff();
+  await loadSchedule();
+  setupPropertiesListener();
+
+  // ユーザー名表示
+  if (state.currentUser) {
+    document.getElementById('btn-user').textContent = state.currentUser;
+  } else if (state.staff.length > 0) {
+    openStaffModal();
+  }
+
+  document.getElementById('loading').style.display = 'none';
+}
+
+// ══════════════════════════════════════════════════════
+// 物件データ（Firestore リアルタイム）
+// ══════════════════════════════════════════════════════
+function setupPropertiesListener() {
+  db.collection('properties')
+    .where('weekOf', '==', getMonday())
+    .onSnapshot(snap => {
+      state.properties = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+      renderHome();
+      renderProperties();
+    }, err => {
+      console.error('Firestore error:', err);
+      document.getElementById('loading').style.display = 'none';
+    });
+}
+
+// ══════════════════════════════════════════════════════
+// ホーム画面
+// ══════════════════════════════════════════════════════
+function renderHome() {
+  const list  = document.getElementById('home-list');
+  const empty = document.getElementById('home-empty');
+  const ps    = state.properties;
+
+  // 週ラベル
+  const mon = new Date(getMonday() + 'T00:00:00');
+  const fri = new Date(mon); fri.setDate(fri.getDate() + 4);
+  document.getElementById('week-label').textContent =
+    `${mon.getMonth()+1}/${mon.getDate()}（月）〜 ${fri.getMonth()+1}/${fri.getDate()}（金）`;
+
+  // 進捗
+  const total = ps.reduce((s, p) => s + (p.weeklyVisits || 1), 0);
+  const done  = ps.reduce((s, p) => s + Math.min(p.visitedCount || 0, p.weeklyVisits || 1), 0);
+  document.getElementById('progress-text').textContent = `${done} / ${total} 件完了`;
+  document.getElementById('progress-bar').style.width = total > 0 ? `${Math.round(done/total*100)}%` : '0%';
+
+  if (ps.length === 0) {
+    empty.classList.remove('hidden');
+    list.innerHTML = '';
+    return;
+  }
+  empty.classList.add('hidden');
+  list.innerHTML = ps.map(p => propCard(p)).join('');
+}
+
+// ══════════════════════════════════════════════════════
+// 物件一覧画面
+// ══════════════════════════════════════════════════════
+function renderProperties() {
+  const q    = (document.getElementById('search-input')?.value || '').toLowerCase();
+  const list = document.getElementById('prop-list');
+  const empty = document.getElementById('prop-empty');
+  const ps   = q
+    ? state.properties.filter(p => p.name.toLowerCase().includes(q) || (p.address||'').toLowerCase().includes(q))
+    : state.properties;
+
+  if (ps.length === 0) {
+    empty.classList.remove('hidden');
+    list.innerHTML = '';
+    return;
+  }
+  empty.classList.add('hidden');
+  list.innerHTML = ps.map(p => propCard(p)).join('');
+}
+
+// ── 物件カード（共通） ──────────────────────────────
+function propCard(p) {
+  const visited = (p.visitedCount || 0) >= (p.weeklyVisits || 1);
+  return `
+    <div onclick="openDetail('${p.id}')"
+         class="card-in tap bg-white rounded-2xl shadow-sm px-4 py-4 flex items-center gap-3 ${visited ? 'opacity-50' : ''}">
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-1.5 flex-wrap mb-0.5">
+          <p class="font-bold text-gray-800 text-sm">${p.autoLockCode ? '🔒 ' : ''}${esc(p.name)}</p>
+          ${p.weeklyVisits === 2 ? '<span class="text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded-full font-bold">×2</span>' : ''}
+          ${visited ? '<span class="text-xs bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded-full font-bold">完了</span>' : ''}
+        </div>
+        <p class="text-xs text-gray-400 truncate">${esc(p.address)}</p>
+        ${p.fixedSchedule ? `<p class="text-xs text-indigo-500 mt-0.5">📌 ${esc(p.fixedSchedule)}</p>` : ''}
+      </div>
+      <span class="text-gray-300 text-xl shrink-0">›</span>
+    </div>`;
+}
+
+// ══════════════════════════════════════════════════════
+// 物件詳細モーダル
+// ══════════════════════════════════════════════════════
+function openDetail(id) {
+  const p = state.properties.find(x => x.id === id);
+  if (!p) return;
+  state.detailId = id;
+
+  document.getElementById('detail-name').textContent    = p.name;
+  document.getElementById('detail-address').textContent = p.address || '—';
+  document.getElementById('detail-visits').textContent  =
+    `今週 ${p.weeklyVisits || 1} 回（${p.visitedCount || 0} 回済み）`;
+
+  // 固定スケジュール
+  const rowFixed = document.getElementById('row-fixed');
+  if (p.fixedSchedule) {
+    rowFixed.classList.remove('hidden');
+    document.getElementById('detail-fixed').textContent = p.fixedSchedule;
+  } else { rowFixed.classList.add('hidden'); }
+
+  // ゴミ
+  const rowGomi = document.getElementById('row-gomi');
+  if (p.gomi) {
+    rowGomi.classList.remove('hidden');
+    document.getElementById('detail-gomi').textContent = p.gomi;
+  } else { rowGomi.classList.add('hidden'); }
+
+  // オートロック
+  const lockSec = document.getElementById('lock-section');
+  if (p.autoLockCode) {
+    lockSec.classList.remove('hidden');
+    const codeEl = document.getElementById('lock-code');
+    codeEl.textContent = p.autoLockCode;
+    codeEl.classList.add('blur-code');
+    codeEl.classList.remove('revealed');
+    document.getElementById('btn-lock').textContent = 'タップで表示';
+  } else { lockSec.classList.add('hidden'); }
+
+  // 訪問済みボタン
+  refreshVisitedBtn(p);
+
+  // メモリアルタイム
+  if (state.memoUnsub) state.memoUnsub();
+  document.getElementById('memo-list').innerHTML =
+    '<p class="text-xs text-gray-400 text-center py-2">読み込み中...</p>';
+  state.memoUnsub = db.collection('properties').doc(id).collection('memos')
+    .orderBy('createdAt', 'desc')
+    .onSnapshot(snap => {
+      renderMemos(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+
+  const modal = document.getElementById('modal-detail');
+  modal.classList.add('open');
+  modal.scrollTop = 0;
+}
+
+function closeDetail() {
+  if (state.memoUnsub) { state.memoUnsub(); state.memoUnsub = null; }
+  document.getElementById('modal-detail').classList.remove('open');
+  state.detailId = null;
+}
+
+function refreshVisitedBtn(p) {
+  const btn    = document.getElementById('btn-visited');
+  const visited = (p.visitedCount || 0) >= (p.weeklyVisits || 1);
+  if (visited) {
+    btn.textContent = '✅ 完了済み';
+    btn.className = 'tap text-xs px-3 py-2 rounded-full font-bold shrink-0 bg-emerald-100 text-emerald-600';
+  } else {
+    btn.textContent = '訪問済みにする';
+    btn.className = 'tap text-xs px-3 py-2 rounded-full font-bold shrink-0 bg-gray-100 text-gray-600 active:bg-emerald-100';
+  }
+}
+
+async function toggleVisited() {
+  const p = state.properties.find(x => x.id === state.detailId);
+  if (!p) return;
+  const max     = p.weeklyVisits || 1;
+  const current = p.visitedCount || 0;
+  const next    = current >= max ? 0 : current + 1;
+  await db.collection('properties').doc(state.detailId).update({ visitedCount: next });
+  // ボタンはonSnapshotが更新するが即時反映のためローカルも更新
+  p.visitedCount = next;
+  refreshVisitedBtn(p);
+}
+
+function toggleLock() {
+  const codeEl = document.getElementById('lock-code');
+  const btn    = document.getElementById('btn-lock');
+  if (codeEl.classList.contains('revealed')) {
+    codeEl.classList.remove('revealed');
+    codeEl.classList.add('blur-code');
+    btn.textContent = 'タップで表示';
+  } else {
+    codeEl.classList.add('revealed');
+    codeEl.classList.remove('blur-code');
+    btn.textContent = '非表示にする';
+  }
+}
+
+// ══════════════════════════════════════════════════════
+// メモ
+// ══════════════════════════════════════════════════════
+function renderMemos(memos) {
+  const list = document.getElementById('memo-list');
+  if (memos.length === 0) {
+    list.innerHTML = '<p class="text-xs text-gray-400 text-center py-3">まだメモはありません</p>';
+    return;
+  }
+  list.innerHTML = memos.map(m => `
+    <div class="bg-gray-50 rounded-xl px-3 py-2.5">
+      <div class="flex items-center gap-2 mb-1">
+        <span class="text-xs font-bold text-emerald-600">${esc(m.author || '不明')}</span>
+        <span class="text-xs text-gray-400">${formatTs(m.createdAt)}</span>
+      </div>
+      <p class="text-sm text-gray-700">${esc(m.body)}</p>
+    </div>`).join('');
+}
+
+async function addMemo() {
+  const input = document.getElementById('memo-input');
+  const body  = input.value.trim();
+  if (!body || !state.detailId) return;
+  await db.collection('properties').doc(state.detailId).collection('memos').add({
+    author: state.currentUser || '不明',
+    body,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+  });
+  input.value = '';
+  input.blur();
+}
+
+document.getElementById('memo-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); addMemo(); }
+});
+
+// ══════════════════════════════════════════════════════
+// Excelインポート
+// ══════════════════════════════════════════════════════
+function previewImport(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    const wb   = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+    const ws   = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+    // 1行目がヘッダーなら除外
+    const start = (rows.length > 0 && typeof rows[0][0] === 'string' && isNaN(parseFloat(rows[0][2]))) ? 1 : 0;
+
+    state.importData = rows.slice(start)
+      .filter(r => String(r[0] || '').trim())
+      .map(r => ({
+        name:         String(r[0] || '').trim(),
+        address:      String(r[1] || '').trim(),
+        weeklyVisits: String(r[2] || '').includes('2') ? 2 : 1,
+        gomi:         String(r[3] || '').trim(),
+        autoLockCode: String(r[4] || '').trim(),
+      }));
+
+    document.getElementById('preview-count').textContent = state.importData.length;
+    document.getElementById('preview-list').innerHTML = state.importData.map(p => `
+      <div class="bg-gray-50 rounded-xl px-3 py-2">
+        <div class="flex items-center gap-1.5 mb-0.5">
+          <p class="text-sm font-bold text-gray-800">${esc(p.name)}</p>
+          ${p.weeklyVisits === 2 ? '<span class="text-xs text-orange-500 font-bold">×2回</span>' : ''}
+          ${p.autoLockCode ? '<span class="text-xs text-amber-600">🔒 番号あり</span>' : ''}
+        </div>
+        <p class="text-xs text-gray-400">${esc(p.address)}</p>
+      </div>`).join('');
+
+    document.getElementById('import-preview').classList.remove('hidden');
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+async function executeImport() {
+  if (state.importData.length === 0) return;
+  const count  = state.importData.length;
+  const weekOf = getMonday();
+
+  // 今週の既存データを削除して上書き
+  const batch   = db.batch();
+  const existing = await db.collection('properties').where('weekOf', '==', weekOf).get();
+  existing.docs.forEach(d => batch.delete(d.ref));
+
+  state.importData.forEach(p => {
+    const ref = db.collection('properties').doc();
+    batch.set(ref, {
+      ...p,
+      weekOf,
+      visitedCount: 0,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+  });
+
+  await batch.commit();
+
+  document.getElementById('import-preview').classList.add('hidden');
+  document.getElementById('file-input').value = '';
+  state.importData = [];
+
+  alert(`✅ ${count}件をインポートしました！`);
+  document.querySelector('[data-screen="home"]').click();
+}
+
+// ══════════════════════════════════════════════════════
+// スタッフ管理
+// ══════════════════════════════════════════════════════
+async function loadStaff() {
+  try {
+    const doc = await db.collection('settings').doc('staff').get();
+    state.staff = doc.exists ? (doc.data().members || []) : [];
+  } catch { state.staff = []; }
+  renderStaffUI();
+}
+
+function renderStaffUI() {
+  // 設定画面のスタッフ一覧
+  document.getElementById('staff-list').innerHTML = state.staff.map(s => `
+    <div class="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-3">
+      <div>
+        <p class="text-sm font-bold text-gray-800">${esc(s.name)}</p>
+        ${s.defaultStart ? `<p class="text-xs text-gray-400">${esc(s.defaultStart)}</p>` : ''}
+      </div>
+      <button onclick="deleteStaff('${s.id}')"
+        class="tap w-10 h-10 flex items-center justify-center text-gray-300 active:text-red-400 text-xl">✕</button>
+    </div>`).join('');
+
+  // スタッフ選択モーダル
+  document.getElementById('staff-select-list').innerHTML = state.staff.length
+    ? state.staff.map(s => `
+        <button onclick="selectUser('${esc(s.name)}')"
+          class="tap w-full bg-emerald-50 text-emerald-700 rounded-xl py-3.5 text-base font-bold active:bg-emerald-100">
+          ${esc(s.name)}
+        </button>`).join('')
+    : '<p class="text-sm text-gray-400 text-center py-4">設定画面でスタッフを登録してください</p>';
+}
+
+async function addStaff() {
+  const name  = document.getElementById('input-staff-name').value.trim();
+  const start = document.getElementById('input-staff-start').value.trim();
+  if (!name) { document.getElementById('input-staff-name').focus(); return; }
+  if (state.staff.length >= 3)              { alert('スタッフは最大3名です。'); return; }
+  if (state.staff.find(s => s.name === name)) { alert('同じ名前のスタッフが既にいます。'); return; }
+
+  state.staff.push({ id: Date.now().toString(36), name, defaultStart: start });
+  await db.collection('settings').doc('staff').set({ members: state.staff });
+  document.getElementById('input-staff-name').value  = '';
+  document.getElementById('input-staff-start').value = '';
+  renderStaffUI();
+}
+
+async function deleteStaff(id) {
+  if (!confirm('このスタッフを削除しますか？')) return;
+  state.staff = state.staff.filter(s => s.id !== id);
+  await db.collection('settings').doc('staff').set({ members: state.staff });
+  renderStaffUI();
+}
+
+function openStaffModal() {
+  renderStaffUI();
+  document.getElementById('modal-staff').classList.add('open');
+}
+
+function selectUser(name) {
+  state.currentUser = name;
+  localStorage.setItem('currentUser', name);
+  document.getElementById('btn-user').textContent = name;
+  document.getElementById('modal-staff').classList.remove('open');
+}
+
+// ══════════════════════════════════════════════════════
+// スケジュール設定
+// ══════════════════════════════════════════════════════
+async function loadSchedule() {
+  try {
+    const doc = await db.collection('settings').doc('schedule').get();
+    if (!doc.exists) return;
+    const d = doc.data();
+    if (d.wed)      document.getElementById('input-wed').value       = d.wed;
+    if (d.friStart) document.getElementById('input-fri-start').value = d.friStart;
+    if (d.friEnd)   document.getElementById('input-fri-end').value   = d.friEnd;
+  } catch {}
+}
+
+async function saveSchedule() {
+  await db.collection('settings').doc('schedule').set({
+    wed:      document.getElementById('input-wed').value,
+    friStart: document.getElementById('input-fri-start').value,
+    friEnd:   document.getElementById('input-fri-end').value,
+  });
+  alert('保存しました！');
+}
+
+// ══════════════════════════════════════════════════════
+// ナビゲーション
+// ══════════════════════════════════════════════════════
+document.querySelectorAll('.nav-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('screen-' + btn.dataset.screen).classList.add('active');
+    document.getElementById('scroll').scrollTop = 0;
+    if (btn.dataset.screen === 'properties') renderProperties();
+  });
+});
+
+// ══════════════════════════════════════════════════════
+// 起動
+// ══════════════════════════════════════════════════════
+initApp();
+</script>
+</body>
+</html>
