@@ -597,27 +597,11 @@ function previewImport(event) {
       document.getElementById('import-preview').classList.remove('hidden');
   }
   const reader = new FileReader();
-  // Shift-JISで読み、文字化けしていればUTF-8で再試行
-  reader.onload = null; // 一度リセット
-  const tryRead = (encoding) => {
-    const r2 = new FileReader();
-    r2.onload = e2 => {
-      const text = e2.target.result;
-      // 文字化け検出：「縺」「繧」などのShift-JIS誤読パターン
-      if (encoding === 'Shift-JIS' && /縺|繧|繝|縲/.test(text)) {
-        tryRead('UTF-8');
-        return;
-      }
-      try {
-        processCSV(text);
-      } catch(err) {
-        alert('ファイルの読み込みに失敗しました。');
-        console.error(err);
-      }
-    };
-    r2.readAsText(file, encoding);
+  reader.onload = e => {
+    try { processCSV(e.target.result); }
+    catch(err) { alert('読み込みに失敗しました。'); console.error(err); }
   };
-  tryRead('Shift-JIS');
+  reader.readAsText(file, 'UTF-8');
 }
 
 async function executeImport() {
