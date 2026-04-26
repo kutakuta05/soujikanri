@@ -378,7 +378,8 @@ const state = {
   currentUser: localStorage.getItem('currentUser') || null,
   detailId: null,
   memoUnsub: null,
-  photoUnsub: null,   // 写真リアルタイムリスナーの解除関数
+  photoUnsub: null,          // 写真リアルタイムリスナーの解除関数
+  checkedRouteProps: new Set(), // ルート画面でチェック済みの物件ID
   importData: [],
   pin: null,
 };
@@ -1092,7 +1093,9 @@ function renderRoutePropList() {
     ? ps.map(p => `
         <label class="flex items-center gap-3 bg-gray-50 rounded-xl px-3 py-3 cursor-pointer">
           <input type="checkbox" id="chk-${p.id}" value="${p.id}"
-            class="w-5 h-5 accent-emerald-500 shrink-0" />
+            class="w-5 h-5 accent-emerald-500 shrink-0"
+            ${state.checkedRouteProps.has(p.id) ? 'checked' : ''}
+            onchange="toggleRouteCheck('${p.id}', this.checked)" />
           <div class="flex-1 min-w-0">
             <p class="text-sm font-medium text-gray-800 truncate">${esc(p.name)}</p>
             <p class="text-xs text-gray-400 truncate">${esc(p.address)}</p>
@@ -1101,20 +1104,28 @@ function renderRoutePropList() {
     : '<p class="text-sm text-gray-400 text-center py-3">該当する物件がありません</p>';
 }
 
+function toggleRouteCheck(id, checked) {
+  if (checked) state.checkedRouteProps.add(id);
+  else state.checkedRouteProps.delete(id);
+}
+
 function toggleAllProps() {
   const checkboxes = document.querySelectorAll('#route-prop-list input[type=checkbox]');
   const allChecked = Array.from(checkboxes).every(c => c.checked);
-  checkboxes.forEach(c => c.checked = !allChecked);
+  checkboxes.forEach(c => {
+    c.checked = !allChecked;
+    toggleRouteCheck(c.value, !allChecked);
+  });
 }
 
 async function calcRoute() {
   const start = document.getElementById('route-start').value.trim();
   if (!start) { alert('出発地点を入力してください。'); return; }
 
-  const selected = state.properties.filter(p => {
-    const chk = document.getElementById(`chk-${p.id}`);
-    return chk && chk.checked && p.address;
-  });
+  // DOMのチェック状態ではなくSetで管理した選択IDから取得（検索絞り込み後も維持される）
+  const selected = state.properties.filter(p =>
+    state.checkedRouteProps.has(p.id) && p.address
+  );
   if (selected.length === 0) { alert('物件を1件以上選択してください。'); return; }
   if (!gMap) { alert('地図の読み込み中です。少し待ってから再試行してください。'); return; }
 
