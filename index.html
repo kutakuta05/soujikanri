@@ -302,6 +302,9 @@
         <p class="text-sm font-bold text-gray-700">含める物件</p>
         <button onclick="toggleAllProps()" class="text-xs text-emerald-500 font-bold">全選択/解除</button>
       </div>
+      <input id="route-search" type="text" placeholder="物件名・住所で絞り込み..."
+        oninput="renderRoutePropList()"
+        class="w-full border border-gray-200 rounded-xl px-3 py-2.5 mb-3 focus:outline-none focus:border-emerald-400" />
       <div id="route-prop-list" class="space-y-2"></div>
     </div>
 
@@ -1074,21 +1077,28 @@ function initMap() {
 }
 
 function renderRoutePropList() {
-  const ps   = state.properties;
   const list = document.getElementById('route-prop-list');
-  if (ps.length === 0) {
+  if (state.properties.length === 0) {
     list.innerHTML = '<p class="text-sm text-gray-400 text-center py-4">物件がありません。先にインポートしてください。</p>';
     return;
   }
-  list.innerHTML = ps.map(p => `
-    <label class="flex items-center gap-3 bg-gray-50 rounded-xl px-3 py-3 cursor-pointer">
-      <input type="checkbox" id="chk-${p.id}" value="${p.id}"
-        class="w-5 h-5 accent-emerald-500 shrink-0" />
-      <div class="flex-1 min-w-0">
-        <p class="text-sm font-medium text-gray-800 truncate">${esc(p.name)}</p>
-        <p class="text-xs text-gray-400 truncate">${esc(p.address)}</p>
-      </div>
-    </label>`).join('');
+
+  const q  = (document.getElementById('route-search')?.value || '').toLowerCase();
+  const ps = q
+    ? state.properties.filter(p => p.name.toLowerCase().includes(q) || (p.address||'').toLowerCase().includes(q))
+    : state.properties;
+
+  list.innerHTML = ps.length > 0
+    ? ps.map(p => `
+        <label class="flex items-center gap-3 bg-gray-50 rounded-xl px-3 py-3 cursor-pointer">
+          <input type="checkbox" id="chk-${p.id}" value="${p.id}"
+            class="w-5 h-5 accent-emerald-500 shrink-0" />
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-medium text-gray-800 truncate">${esc(p.name)}</p>
+            <p class="text-xs text-gray-400 truncate">${esc(p.address)}</p>
+          </div>
+        </label>`).join('')
+    : '<p class="text-sm text-gray-400 text-center py-3">該当する物件がありません</p>';
 }
 
 function toggleAllProps() {
