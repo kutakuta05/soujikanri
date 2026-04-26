@@ -573,13 +573,22 @@ function closeDetail() {
 
 function refreshVisitedBtn(p) {
   const btn     = document.getElementById('btn-visited');
-  const visited = (p.visitedCount || 0) >= (p.weeklyVisits || 1);
-  if (visited) {
-    btn.textContent = '✅ 完了済み';
-    btn.className = 'tap text-xs px-3 py-2 rounded-full font-bold shrink-0 bg-emerald-100 text-emerald-600';
+  const total   = p.weeklyVisits || 1;
+  const current = p.visitedCount || 0;
+  const done    = current >= total;
+
+  if (done) {
+    // 完了状態。active: クラスを付けてタップ感触を出す（押すとリセット）
+    btn.textContent = `✅ 完了 ${current}/${total}`;
+    btn.className   = 'tap text-xs px-3 py-2 rounded-full font-bold shrink-0 bg-emerald-100 text-emerald-700 active:bg-gray-100 active:text-gray-500';
+  } else if (current > 0) {
+    // 週2回物件の途中（1回済み）
+    btn.textContent = `${current}/${total}回 ＋もう1回`;
+    btn.className   = 'tap text-xs px-3 py-2 rounded-full font-bold shrink-0 bg-orange-100 text-orange-700 active:bg-orange-200';
   } else {
-    btn.textContent = '訪問済みにする';
-    btn.className = 'tap text-xs px-3 py-2 rounded-full font-bold shrink-0 bg-gray-100 text-gray-600 active:bg-emerald-100';
+    // 未訪問
+    btn.textContent = total > 1 ? `訪問済みにする (0/${total})` : '訪問済みにする';
+    btn.className   = 'tap text-xs px-3 py-2 rounded-full font-bold shrink-0 bg-gray-100 text-gray-600 active:bg-emerald-100 active:text-emerald-600';
   }
 }
 
@@ -604,6 +613,9 @@ async function toggleVisited() {
     await db.collection('properties').doc(state.detailId).update({ visitedCount: next });
     p.visitedCount = next;
     refreshVisitedBtn(p);
+    // detail-visits テキストもその場で更新（onSnapshotを待たず即反映）
+    document.getElementById('detail-visits').textContent =
+      `今週 ${p.weeklyVisits || 1} 回（${next} 回済み）`;
   } catch (err) {
     console.error(err);
     alert('更新に失敗しました。通信状況を確認してください。');
