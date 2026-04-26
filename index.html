@@ -10,6 +10,8 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+  <!-- Firebase Storage: 画像ファイルをクラウドに保存するためのSDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
   <script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDD0Dl4j3UAbO6MUF5eAoTfeosL0NaVnbk&callback=initMap&language=ja"></script>
   <style>
     * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
@@ -39,6 +41,28 @@
   <p class="text-gray-400 text-sm">読み込み中...</p>
 </div>
 
+<!-- 暗証番号ロック画面 -->
+<div id="modal-pin" class="modal flex-col items-center justify-center bg-gray-50 px-4" style="z-index:100;">
+  <div class="text-5xl mb-4">🔐</div>
+  <h2 class="text-xl font-bold text-gray-800 mb-1">暗証番号を入力</h2>
+  <p class="text-sm text-gray-400 mb-6">物件情報にアクセスするには暗証番号が必要です</p>
+  <input id="pin-input-lock" type="password" inputmode="numeric" maxlength="8"
+    placeholder="暗証番号"
+    class="w-full max-w-xs text-center text-2xl tracking-widest border-2 border-gray-200 rounded-2xl px-4 py-4 mb-3 focus:outline-none focus:border-emerald-400" />
+  <p id="pin-error" class="text-sm text-red-500 mb-4 hidden">暗証番号が違います</p>
+  <button onclick="submitPin()"
+    class="tap w-full max-w-xs bg-emerald-500 text-white rounded-2xl py-4 font-bold text-base active:bg-emerald-700">
+    確認
+  </button>
+</div>
+
+<!-- 写真フルスクリーンモーダル -->
+<div id="modal-photo" class="modal items-center justify-center bg-black" style="z-index:200;">
+  <button onclick="closePhotoModal()"
+    class="absolute top-4 right-4 w-10 h-10 flex items-center justify-center text-white text-2xl bg-black/40 rounded-full">✕</button>
+  <img id="photo-fullscreen" src="" alt="" class="max-w-full max-h-full object-contain" />
+</div>
+
 <!-- スタッフ選択モーダル -->
 <div id="modal-staff" class="modal flex-col items-center justify-center bg-black/50 px-4">
   <div class="bg-white rounded-3xl p-6 w-full max-w-sm">
@@ -50,7 +74,6 @@
 
 <!-- 物件詳細モーダル -->
 <div id="modal-detail" class="modal flex-col bg-white overflow-y-auto">
-  <!-- 詳細ヘッダー -->
   <div class="sticky top-0 bg-white border-b border-gray-100 px-4 flex items-center gap-3 z-10"
        style="padding-top: max(env(safe-area-inset-top), 12px); padding-bottom: 12px;">
     <button onclick="closeDetail()" class="tap w-10 h-10 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 text-xl shrink-0">←</button>
@@ -62,7 +85,6 @@
   </div>
 
   <div class="px-4 pt-4 pb-10 space-y-4">
-    <!-- 物件情報 -->
     <div class="bg-gray-50 rounded-2xl p-4 space-y-2 text-sm">
       <div class="flex gap-3">
         <span class="text-gray-400 w-14 shrink-0">住所</span>
@@ -82,7 +104,6 @@
       </div>
     </div>
 
-    <!-- オートロック -->
     <div id="lock-section" class="hidden bg-amber-50 rounded-2xl p-4">
       <p class="text-xs text-amber-500 font-bold mb-2">🔒 オートロック番号</p>
       <div class="flex items-center justify-between gap-3">
@@ -94,7 +115,20 @@
       </div>
     </div>
 
-    <!-- メモ -->
+    <!-- 写真 -->
+    <div>
+      <div class="flex items-center justify-between mb-3">
+        <p class="text-sm font-bold text-gray-600">📷 写真（最大2枚）</p>
+        <label id="photo-upload-label"
+          class="tap cursor-pointer bg-emerald-50 text-emerald-600 text-xs px-3 py-1.5 rounded-full font-bold active:bg-emerald-100">
+          ＋ 追加
+          <input id="photo-file-input" type="file" accept="image/*" class="hidden" />
+        </label>
+      </div>
+      <p id="photo-uploading" class="hidden text-xs text-gray-400 mb-2">アップロード中...</p>
+      <div id="photo-grid" class="grid grid-cols-2 gap-2 mb-1"></div>
+    </div>
+
     <div>
       <p class="text-sm font-bold text-gray-600 mb-3">📝 メモ（全員にリアルタイム共有）</p>
       <div id="memo-list" class="space-y-2 mb-3 min-h-8"></div>
@@ -127,7 +161,6 @@
       <p class="text-sm font-medium text-gray-500">今週の案件</p>
       <span id="week-label" class="text-xs text-gray-400"></span>
     </div>
-    <!-- 進捗 -->
     <div class="bg-white rounded-2xl shadow-sm p-4 mb-4">
       <div class="flex justify-between text-xs text-gray-500 mb-2">
         <span>今週の進捗</span>
@@ -178,7 +211,6 @@
       <p class="text-xs text-gray-400 mt-2">※ ExcelをCSV形式で保存してからアップロードしてください</p>
     </div>
 
-    <!-- プレビュー -->
     <div id="import-preview" class="hidden bg-white rounded-2xl shadow-sm p-4 mb-4">
       <p class="text-sm font-bold text-gray-700 mb-3">👀 プレビュー（<span id="preview-count">0</span>件）</p>
       <div id="preview-list" class="space-y-2 max-h-64 overflow-y-auto mb-4"></div>
@@ -191,7 +223,7 @@
 
   <!-- ④ 設定 -->
   <div id="screen-settings" class="screen">
-    <p class="text-sm font-medium text-gray-500 mb-4">スタッフ・スケジュール設定</p>
+    <p class="text-sm font-medium text-gray-500 mb-4">スタッフ設定</p>
 
     <!-- スタッフ -->
     <div class="bg-white rounded-2xl shadow-sm p-4 mb-4">
@@ -209,30 +241,35 @@
       </div>
     </div>
 
-    <!-- スケジュール制約 -->
+    <!-- 暗証番号 -->
     <div class="bg-white rounded-2xl shadow-sm p-4 mb-4">
-      <p class="text-sm font-bold text-gray-700 mb-3">📅 スケジュール制約</p>
-      <div class="space-y-3">
-        <div>
-          <label class="text-xs text-gray-500 block mb-1">水曜の固定訪問時間</label>
-          <input id="input-wed" type="time" value="14:00"
-            class="border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-emerald-400" />
+      <p class="text-sm font-bold text-gray-700 mb-3">🔐 アクセス暗証番号</p>
+      <p id="pin-status" class="text-xs text-gray-400 mb-3">設定なし（誰でも閲覧可能）</p>
+      <div class="space-y-2">
+        <input id="input-pin" type="password" inputmode="numeric" maxlength="8"
+          placeholder="新しい暗証番号（数字4〜8桁）"
+          class="w-full border border-gray-200 rounded-xl px-3 py-3 focus:outline-none focus:border-emerald-400" />
+        <div class="flex gap-2">
+          <button onclick="savePin()"
+            class="tap flex-1 bg-gray-700 text-white rounded-xl py-3 font-bold text-sm active:bg-gray-900">
+            設定する
+          </button>
+          <button onclick="removePin()"
+            class="tap flex-1 bg-gray-100 text-gray-500 rounded-xl py-3 font-bold text-sm active:bg-gray-200">
+            解除する
+          </button>
         </div>
-        <div>
-          <label class="text-xs text-gray-500 block mb-1">金曜の開始時間</label>
-          <input id="input-fri-start" type="time" value="05:30"
-            class="border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-emerald-400" />
-        </div>
-        <div>
-          <label class="text-xs text-gray-500 block mb-1">金曜の終了時間</label>
-          <input id="input-fri-end" type="time" value="15:00"
-            class="border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-emerald-400" />
-        </div>
-        <button onclick="saveSchedule()"
-          class="tap w-full bg-gray-700 text-white rounded-xl py-3 font-bold text-sm active:bg-gray-900">
-          保存する
-        </button>
       </div>
+    </div>
+
+    <!-- 全リセット -->
+    <div class="bg-white rounded-2xl shadow-sm p-4 mb-4">
+      <p class="text-sm font-bold text-gray-700 mb-1">⚠️ 全データリセット</p>
+      <p class="text-xs text-gray-400 mb-3">今週の物件データをすべて削除します。この操作は元に戻せません。</p>
+      <button onclick="resetAllData()"
+        class="tap w-full bg-red-500 text-white rounded-xl py-3 font-bold text-sm active:bg-red-700">
+        全データを削除する
+      </button>
     </div>
   </div>
 
@@ -240,7 +277,6 @@
   <div id="screen-route" class="screen">
     <p class="text-sm font-medium text-gray-500 mb-4">ルート計算</p>
 
-    <!-- 出発設定 -->
     <div class="bg-white rounded-2xl shadow-sm p-4 mb-4">
       <div class="mb-3">
         <label class="text-xs text-gray-500 block mb-1">出発地点</label>
@@ -258,7 +294,6 @@
       </button>
     </div>
 
-    <!-- 含める物件 -->
     <div class="bg-white rounded-2xl shadow-sm p-4 mb-4">
       <div class="flex items-center justify-between mb-3">
         <p class="text-sm font-bold text-gray-700">含める物件</p>
@@ -267,7 +302,6 @@
       <div id="route-prop-list" class="space-y-2"></div>
     </div>
 
-    <!-- 計算結果 -->
     <div id="route-result" class="hidden">
       <div id="map" class="w-full rounded-2xl overflow-hidden mb-4" style="height:260px;"></div>
       <div class="bg-white rounded-2xl shadow-sm p-4 mb-4">
@@ -322,18 +356,25 @@ firebase.initializeApp({
   messagingSenderId: "853246001624",
   appId: "1:853246001624:web:edfe70cc1d98d10f2fb2ad"
 });
+// Firestore: テキストデータ（物件情報・メモ・写真メタデータ）の保存先
 const db = firebase.firestore();
+
+// Storage: 画像ファイルそのものの保存先（Firestoreとは別サービス）
+// ※ Firebase Consoleの「Storage」でセキュリティルールの設定が別途必要
+const storage = firebase.storage();
 
 // ══════════════════════════════════════════════════════
 // 状態管理
 // ══════════════════════════════════════════════════════
 const state = {
-  properties: [],       // 今週の物件一覧
-  staff: [],            // スタッフ一覧
+  properties: [],
+  staff: [],
   currentUser: localStorage.getItem('currentUser') || null,
-  detailId: null,       // 詳細表示中の物件ID
-  memoUnsub: null,      // メモのリアルタイムリスナー解除関数
-  importData: [],       // インポートプレビューデータ
+  detailId: null,
+  memoUnsub: null,
+  photoUnsub: null,   // 写真リアルタイムリスナーの解除関数
+  importData: [],
+  pin: null,
 };
 
 // ══════════════════════════════════════════════════════
@@ -341,10 +382,9 @@ const state = {
 // ══════════════════════════════════════════════════════
 const esc = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';
 
-// 今週の月曜日を YYYY-MM-DD で返す
 function getMonday() {
   const d = new Date();
-  const day = d.getDay(); // 0=日, 1=月 ...
+  const day = d.getDay();
   const diff = day === 0 ? -6 : 1 - day;
   d.setDate(d.getDate() + diff);
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -361,16 +401,18 @@ function formatTs(ts) {
 // ══════════════════════════════════════════════════════
 async function initApp() {
   await loadStaff();
-  await loadSchedule();
-  setupPropertiesListener();
+  const locked = await checkPin();
+  if (locked) return;
+  await finalizeInit();
+}
 
-  // ユーザー名表示
+async function finalizeInit() {
+  setupPropertiesListener();
   if (state.currentUser) {
     document.getElementById('btn-user').textContent = state.currentUser;
   } else if (state.staff.length > 0) {
     openStaffModal();
   }
-
   document.getElementById('loading').style.display = 'none';
 }
 
@@ -400,13 +442,11 @@ function renderHome() {
   const empty = document.getElementById('home-empty');
   const ps    = state.properties;
 
-  // 週ラベル
   const mon = new Date(getMonday() + 'T00:00:00');
-  const fri = new Date(mon); fri.setDate(fri.getDate() + 4);
+  const sun = new Date(mon); sun.setDate(sun.getDate() + 6);
   document.getElementById('week-label').textContent =
-    `${mon.getMonth()+1}/${mon.getDate()}（月）〜 ${fri.getMonth()+1}/${fri.getDate()}（金）`;
+    `${mon.getMonth()+1}/${mon.getDate()}（月）〜 ${sun.getMonth()+1}/${sun.getDate()}（日）`;
 
-  // 進捗
   const total = ps.reduce((s, p) => s + (p.weeklyVisits || 1), 0);
   const done  = ps.reduce((s, p) => s + Math.min(p.visitedCount || 0, p.weeklyVisits || 1), 0);
   document.getElementById('progress-text').textContent = `${done} / ${total} 件完了`;
@@ -425,10 +465,10 @@ function renderHome() {
 // 物件一覧画面
 // ══════════════════════════════════════════════════════
 function renderProperties() {
-  const q    = (document.getElementById('search-input')?.value || '').toLowerCase();
-  const list = document.getElementById('prop-list');
+  const q     = (document.getElementById('search-input')?.value || '').toLowerCase();
+  const list  = document.getElementById('prop-list');
   const empty = document.getElementById('prop-empty');
-  const ps   = q
+  const ps    = q
     ? state.properties.filter(p => p.name.toLowerCase().includes(q) || (p.address||'').toLowerCase().includes(q))
     : state.properties;
 
@@ -441,7 +481,6 @@ function renderProperties() {
   list.innerHTML = ps.map(p => propCard(p)).join('');
 }
 
-// ── 物件カード（共通） ──────────────────────────────
 function propCard(p) {
   const visited = (p.visitedCount || 0) >= (p.weeklyVisits || 1);
   return `
@@ -473,21 +512,18 @@ function openDetail(id) {
   document.getElementById('detail-visits').textContent  =
     `今週 ${p.weeklyVisits || 1} 回（${p.visitedCount || 0} 回済み）`;
 
-  // 固定スケジュール
   const rowFixed = document.getElementById('row-fixed');
   if (p.fixedSchedule) {
     rowFixed.classList.remove('hidden');
     document.getElementById('detail-fixed').textContent = p.fixedSchedule;
   } else { rowFixed.classList.add('hidden'); }
 
-  // ゴミ
   const rowGomi = document.getElementById('row-gomi');
   if (p.gomi) {
     rowGomi.classList.remove('hidden');
     document.getElementById('detail-gomi').textContent = p.gomi;
   } else { rowGomi.classList.add('hidden'); }
 
-  // オートロック
   const lockSec = document.getElementById('lock-section');
   if (p.autoLockCode) {
     lockSec.classList.remove('hidden');
@@ -498,10 +534,11 @@ function openDetail(id) {
     document.getElementById('btn-lock').textContent = 'タップで表示';
   } else { lockSec.classList.add('hidden'); }
 
-  // 訪問済みボタン
   refreshVisitedBtn(p);
 
-  // メモリアルタイム
+  // --- メモ リアルタイムリスナー ---
+  // onSnapshot: Firestoreのデータが変わるたびに自動でUIを更新する仕組み
+  // 物件ごとのサブコレクション「memos」を監視
   if (state.memoUnsub) state.memoUnsub();
   document.getElementById('memo-list').innerHTML =
     '<p class="text-xs text-gray-400 text-center py-2">読み込み中...</p>';
@@ -511,19 +548,31 @@ function openDetail(id) {
       renderMemos(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
+  // --- 写真 リアルタイムリスナー ---
+  // 同じ物件のサブコレクション「photos」を監視（メモと同じ仕組み）
+  if (state.photoUnsub) state.photoUnsub();
+  document.getElementById('photo-grid').innerHTML = '';
+  state.photoUnsub = db.collection('properties').doc(id).collection('photos')
+    .orderBy('createdAt', 'asc')
+    .onSnapshot(snap => {
+      renderPhotos(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+
   const modal = document.getElementById('modal-detail');
   modal.classList.add('open');
   modal.scrollTop = 0;
 }
 
 function closeDetail() {
-  if (state.memoUnsub) { state.memoUnsub(); state.memoUnsub = null; }
+  // モーダルを閉じるときにリスナーを解除（リソースリーク防止）
+  if (state.memoUnsub)  { state.memoUnsub();  state.memoUnsub  = null; }
+  if (state.photoUnsub) { state.photoUnsub(); state.photoUnsub = null; }
   document.getElementById('modal-detail').classList.remove('open');
   state.detailId = null;
 }
 
 function refreshVisitedBtn(p) {
-  const btn    = document.getElementById('btn-visited');
+  const btn     = document.getElementById('btn-visited');
   const visited = (p.visitedCount || 0) >= (p.weeklyVisits || 1);
   if (visited) {
     btn.textContent = '✅ 完了済み';
@@ -534,16 +583,36 @@ function refreshVisitedBtn(p) {
   }
 }
 
+let isVisitedUpdating = false;
+
 async function toggleVisited() {
+  if (isVisitedUpdating) return;
   const p = state.properties.find(x => x.id === state.detailId);
   if (!p) return;
-  const max     = p.weeklyVisits || 1;
-  const current = p.visitedCount || 0;
-  const next    = current >= max ? 0 : current + 1;
-  await db.collection('properties').doc(state.detailId).update({ visitedCount: next });
-  // ボタンはonSnapshotが更新するが即時反映のためローカルも更新
-  p.visitedCount = next;
-  refreshVisitedBtn(p);
+
+  isVisitedUpdating = true;
+  const btn       = document.getElementById('btn-visited');
+  const prevClass = btn.className;
+  const prevText  = btn.textContent;
+  btn.textContent = '更新中...';
+  btn.disabled    = true;
+
+  try {
+    const max     = p.weeklyVisits || 1;
+    const current = p.visitedCount || 0;
+    const next    = current >= max ? 0 : current + 1;
+    await db.collection('properties').doc(state.detailId).update({ visitedCount: next });
+    p.visitedCount = next;
+    refreshVisitedBtn(p);
+  } catch (err) {
+    console.error(err);
+    alert('更新に失敗しました。通信状況を確認してください。');
+    btn.className   = prevClass;
+    btn.textContent = prevText;
+  } finally {
+    btn.disabled      = false;
+    isVisitedUpdating = false;
+  }
 }
 
 function toggleLock() {
@@ -597,10 +666,9 @@ document.getElementById('memo-input').addEventListener('keydown', e => {
 });
 
 // ══════════════════════════════════════════════════════
-// CSVインポート（ライブラリ不要）
+// CSVインポート
 // ══════════════════════════════════════════════════════
 function parseCSV(text) {
-  // 改行コード統一
   const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
   return lines.map(line => {
     const cols = [];
@@ -621,34 +689,33 @@ function previewImport(event) {
   if (!file) return;
 
   function processCSV(csvText) {
-      const rows = parseCSV(csvText);
+    const rows  = parseCSV(csvText);
+    const start = (rows.length > 0 && isNaN(parseFloat(rows[0][2]))) ? 1 : 0;
 
-      // 1行目がヘッダー（数字以外）なら除外
-      const start = (rows.length > 0 && isNaN(parseFloat(rows[0][2]))) ? 1 : 0;
+    state.importData = rows.slice(start)
+      .filter(r => String(r[0] || '').trim() && String(r[1] || '').trim())
+      .map(r => ({
+        name:         String(r[0] || '').trim(),
+        address:      String(r[1] || '').trim(),
+        weeklyVisits: String(r[2] || '').includes('2') ? 2 : 1,
+        gomi:         String(r[3] || '').trim(),
+        autoLockCode: String(r[4] || '').trim(),
+      }));
 
-      state.importData = rows.slice(start)
-        .filter(r => String(r[0] || '').trim() && String(r[1] || '').trim())
-        .map(r => ({
-          name:         String(r[0] || '').trim(),
-          address:      String(r[1] || '').trim(),
-          weeklyVisits: String(r[2] || '').includes('2') ? 2 : 1,
-          gomi:         String(r[3] || '').trim(),
-          autoLockCode: String(r[4] || '').trim(),
-        }));
+    document.getElementById('preview-count').textContent = state.importData.length;
+    document.getElementById('preview-list').innerHTML = state.importData.map(p => `
+      <div class="bg-gray-50 rounded-xl px-3 py-2">
+        <div class="flex items-center gap-1.5 mb-0.5">
+          <p class="text-sm font-bold text-gray-800">${esc(p.name)}</p>
+          ${p.weeklyVisits === 2 ? '<span class="text-xs text-orange-500 font-bold">×2回</span>' : ''}
+          ${p.autoLockCode ? '<span class="text-xs text-amber-600">🔒 番号あり</span>' : ''}
+        </div>
+        <p class="text-xs text-gray-400">${esc(p.address)}</p>
+      </div>`).join('');
 
-      document.getElementById('preview-count').textContent = state.importData.length;
-      document.getElementById('preview-list').innerHTML = state.importData.map(p => `
-        <div class="bg-gray-50 rounded-xl px-3 py-2">
-          <div class="flex items-center gap-1.5 mb-0.5">
-            <p class="text-sm font-bold text-gray-800">${esc(p.name)}</p>
-            ${p.weeklyVisits === 2 ? '<span class="text-xs text-orange-500 font-bold">×2回</span>' : ''}
-            ${p.autoLockCode ? '<span class="text-xs text-amber-600">🔒 番号あり</span>' : ''}
-          </div>
-          <p class="text-xs text-gray-400">${esc(p.address)}</p>
-        </div>`).join('');
-
-      document.getElementById('import-preview').classList.remove('hidden');
+    document.getElementById('import-preview').classList.remove('hidden');
   }
+
   const reader = new FileReader();
   reader.onload = e => {
     try { processCSV(e.target.result); }
@@ -662,8 +729,7 @@ async function executeImport() {
   const count  = state.importData.length;
   const weekOf = getMonday();
 
-  // 今週の既存データを削除して上書き
-  const batch   = db.batch();
+  const batch    = db.batch();
   const existing = await db.collection('properties').where('weekOf', '==', weekOf).get();
   existing.docs.forEach(d => batch.delete(d.ref));
 
@@ -699,7 +765,6 @@ async function loadStaff() {
 }
 
 function renderStaffUI() {
-  // 設定画面のスタッフ一覧
   document.getElementById('staff-list').innerHTML = state.staff.map(s => `
     <div class="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-3">
       <div>
@@ -710,7 +775,6 @@ function renderStaffUI() {
         class="tap w-10 h-10 flex items-center justify-center text-gray-300 active:text-red-400 text-xl">✕</button>
     </div>`).join('');
 
-  // スタッフ選択モーダル
   document.getElementById('staff-select-list').innerHTML = state.staff.length
     ? state.staff.map(s => `
         <button onclick="selectUser('${esc(s.name)}')"
@@ -724,7 +788,7 @@ async function addStaff() {
   const name  = document.getElementById('input-staff-name').value.trim();
   const start = document.getElementById('input-staff-start').value.trim();
   if (!name) { document.getElementById('input-staff-name').focus(); return; }
-  if (state.staff.length >= 3)              { alert('スタッフは最大3名です。'); return; }
+  if (state.staff.length >= 3)               { alert('スタッフは最大3名です。'); return; }
   if (state.staff.find(s => s.name === name)) { alert('同じ名前のスタッフが既にいます。'); return; }
 
   state.staff.push({ id: Date.now().toString(36), name, defaultStart: start });
@@ -754,26 +818,219 @@ function selectUser(name) {
 }
 
 // ══════════════════════════════════════════════════════
-// スケジュール設定
+// 暗証番号
 // ══════════════════════════════════════════════════════
-async function loadSchedule() {
+async function checkPin() {
   try {
-    const doc = await db.collection('settings').doc('schedule').get();
-    if (!doc.exists) return;
-    const d = doc.data();
-    if (d.wed)      document.getElementById('input-wed').value       = d.wed;
-    if (d.friStart) document.getElementById('input-fri-start').value = d.friStart;
-    if (d.friEnd)   document.getElementById('input-fri-end').value   = d.friEnd;
-  } catch {}
+    const doc = await db.collection('settings').doc('security').get();
+    if (!doc.exists || !doc.data().pin) {
+      updatePinStatus(false);
+      return false;
+    }
+    state.pin = doc.data().pin;
+    updatePinStatus(true);
+    if (sessionStorage.getItem('pinOk') === 'yes') return false;
+    // ロック画面を表示
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('modal-pin').classList.add('open');
+    setTimeout(() => document.getElementById('pin-input-lock').focus(), 100);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-async function saveSchedule() {
-  await db.collection('settings').doc('schedule').set({
-    wed:      document.getElementById('input-wed').value,
-    friStart: document.getElementById('input-fri-start').value,
-    friEnd:   document.getElementById('input-fri-end').value,
+function updatePinStatus(hasPin) {
+  const el = document.getElementById('pin-status');
+  if (el) el.textContent = hasPin ? '✅ 暗証番号が設定されています' : '設定なし（誰でも閲覧可能）';
+}
+
+async function submitPin() {
+  const input   = document.getElementById('pin-input-lock');
+  const errorEl = document.getElementById('pin-error');
+  if (input.value === state.pin) {
+    sessionStorage.setItem('pinOk', 'yes');
+    document.getElementById('modal-pin').classList.remove('open');
+    errorEl.classList.add('hidden');
+    document.getElementById('loading').style.display = 'flex';
+    await finalizeInit();
+  } else {
+    errorEl.classList.remove('hidden');
+    input.value = '';
+    input.focus();
+  }
+}
+
+async function savePin() {
+  const pin = document.getElementById('input-pin').value.trim();
+  if (!/^\d{4,8}$/.test(pin)) {
+    alert('暗証番号は数字4〜8桁で入力してください。');
+    return;
+  }
+  await db.collection('settings').doc('security').set({ pin });
+  state.pin = pin;
+  document.getElementById('input-pin').value = '';
+  updatePinStatus(true);
+  alert('暗証番号を設定しました。');
+}
+
+async function removePin() {
+  if (!confirm('暗証番号を解除しますか？誰でも閲覧できるようになります。')) return;
+  await db.collection('settings').doc('security').delete();
+  state.pin = null;
+  sessionStorage.removeItem('pinOk');
+  updatePinStatus(false);
+  alert('暗証番号を解除しました。');
+}
+
+document.getElementById('pin-input-lock').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); submitPin(); }
+});
+
+// ══════════════════════════════════════════════════════
+// 全データリセット
+// ══════════════════════════════════════════════════════
+async function resetAllData() {
+  if (!confirm('今週の全物件データを削除しますか？\nこの操作は元に戻せません。')) return;
+  if (!confirm('本当に削除しますか？\nインポートからやり直しが必要になります。')) return;
+
+  const weekOf = getMonday();
+  const snap   = await db.collection('properties').where('weekOf', '==', weekOf).get();
+  if (snap.empty) { alert('削除するデータがありません。'); return; }
+
+  const batch = db.batch();
+  snap.docs.forEach(d => batch.delete(d.ref));
+  await batch.commit();
+
+  alert('リセットしました。');
+  document.querySelector('[data-screen="home"]').click();
+}
+
+// ══════════════════════════════════════════════════════
+// 写真共有
+// ══════════════════════════════════════════════════════
+
+// 写真グリッドを描画する。onSnapshotから呼ばれる
+function renderPhotos(photos) {
+  const grid        = document.getElementById('photo-grid');
+  const uploadLabel = document.getElementById('photo-upload-label');
+
+  // 2枚以上になったらアップロードボタンを隠す
+  uploadLabel.classList.toggle('hidden', photos.length >= 2);
+
+  if (photos.length === 0) {
+    grid.innerHTML = '<p class="col-span-2 text-xs text-gray-400 text-center py-3">写真はありません</p>';
+    return;
+  }
+
+  grid.innerHTML = photos.map(photo => `
+    <div class="relative rounded-xl overflow-hidden bg-gray-100 aspect-square">
+      <img src="${esc(photo.url)}" alt="" loading="lazy"
+        class="w-full h-full object-cover cursor-pointer"
+        onclick="openPhotoModal('${esc(photo.url)}')" />
+      <button onclick="deletePhoto('${photo.id}', '${esc(photo.storagePath)}')"
+        class="tap absolute top-1 right-1 w-7 h-7 bg-black/50 text-white rounded-full text-xs flex items-center justify-center active:bg-black/80">✕</button>
+      <p class="absolute bottom-0 left-0 right-0 bg-black/40 text-white text-xs px-2 py-1 truncate">${esc(photo.author)}</p>
+    </div>`).join('');
+}
+
+// 画像をJPEG・最大1280pxに圧縮してBlobで返す
+// 理由: スマホ写真は5〜10MBと大きく、そのままStorageに上げると容量を食うため
+function compressImage(file) {
+  return new Promise(resolve => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const MAX = 1280;
+      let { width, height } = img;
+      if (width > MAX || height > MAX) {
+        if (width > height) { height = Math.round(height * MAX / width); width = MAX; }
+        else                { width  = Math.round(width  * MAX / height); height = MAX; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      URL.revokeObjectURL(url);
+      // quality: 0.72 = 画質72%（ファイルサイズと見た目のバランス）
+      canvas.toBlob(resolve, 'image/jpeg', 0.72);
+    };
+    img.src = url;
   });
-  alert('保存しました！');
+}
+
+async function uploadPhoto(file) {
+  if (!file || !state.detailId) return;
+
+  // ── 枚数チェック ───────────────────────────────────────
+  // Firestoreのサブコレクション「photos」のドキュメント数を取得
+  const snap = await db.collection('properties').doc(state.detailId).collection('photos').get();
+  if (snap.size >= 2) {
+    alert('写真は1物件につき最大2枚までです。');
+    return;
+  }
+
+  // ── UI: アップロード中表示 ─────────────────────────────
+  const uploadLabel    = document.getElementById('photo-upload-label');
+  const uploadingLabel = document.getElementById('photo-uploading');
+  uploadLabel.classList.add('hidden');
+  uploadingLabel.classList.remove('hidden');
+
+  try {
+    // ── 圧縮 ──────────────────────────────────────────────
+    const blob = await compressImage(file);
+
+    // ── Storage へアップロード ─────────────────────────────
+    // storage.ref(path) → Storageの保存場所（パス）を指定
+    // パス構造: photos / 週の月曜日 / 物件ID / タイムスタンプ.jpg
+    const p    = state.properties.find(x => x.id === state.detailId);
+    const path = `photos/${p.weekOf}/${state.detailId}/${Date.now()}.jpg`;
+    const ref  = storage.ref(path);
+
+    // ref.put(blob) → ファイルをStorageに送信（非同期）
+    await ref.put(blob, { contentType: 'image/jpeg' });
+
+    // ref.getDownloadURL() → アップロード後の公開URLを取得
+    const url = await ref.getDownloadURL();
+
+    // ── Firestoreにメタデータを保存 ──────────────────────
+    // 画像本体はStorageに、URLや投稿者などの情報はFirestoreに分けて管理
+    await db.collection('properties').doc(state.detailId).collection('photos').add({
+      url,
+      storagePath: path,   // 削除時にStorageを特定するために保持
+      author:      state.currentUser || '不明',
+      createdAt:   firebase.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (err) {
+    console.error(err);
+    alert('アップロードに失敗しました。通信状況を確認してください。');
+    uploadLabel.classList.remove('hidden');
+  } finally {
+    uploadingLabel.classList.add('hidden');
+  }
+}
+
+async function deletePhoto(photoId, storagePath) {
+  if (!confirm('この写真を削除しますか？')) return;
+  try {
+    // FirestoreとStorageの両方から削除する必要がある
+    // Firestoreのメタデータ削除
+    await db.collection('properties').doc(state.detailId).collection('photos').doc(photoId).delete();
+    // Storageの画像ファイル本体を削除
+    await storage.ref(storagePath).delete();
+  } catch (err) {
+    console.error(err);
+    alert('削除に失敗しました。');
+  }
+}
+
+function openPhotoModal(url) {
+  document.getElementById('photo-fullscreen').src = url;
+  document.getElementById('modal-photo').classList.add('open');
+}
+
+function closePhotoModal() {
+  document.getElementById('modal-photo').classList.remove('open');
+  document.getElementById('photo-fullscreen').src = '';
 }
 
 // ══════════════════════════════════════════════════════
@@ -783,7 +1040,7 @@ let gMap = null, gRenderer = null, gRouteWaypoints = [];
 
 function initMap() {
   gMap = new google.maps.Map(document.getElementById('map'), {
-    center: { lat: 34.6937, lng: 135.5023 }, // 大阪デフォルト
+    center: { lat: 34.6937, lng: 135.5023 },
     zoom: 12,
     disableDefaultUI: true,
     zoomControl: true,
@@ -793,7 +1050,7 @@ function initMap() {
 }
 
 function renderRoutePropList() {
-  const ps  = state.properties;
+  const ps   = state.properties;
   const list = document.getElementById('route-prop-list');
   if (ps.length === 0) {
     list.innerHTML = '<p class="text-sm text-gray-400 text-center py-4">物件がありません。先にインポートしてください。</p>';
@@ -825,11 +1082,8 @@ async function calcRoute() {
     return chk && chk.checked && p.address;
   });
   if (selected.length === 0) { alert('物件を1件以上選択してください。'); return; }
-
-  // Google Maps未読み込みチェック
   if (!gMap) { alert('地図の読み込み中です。少し待ってから再試行してください。'); return; }
 
-  // 出発時間設定
   const [h, m] = document.getElementById('route-time').value.split(':').map(Number);
   const depTime = new Date();
   depTime.setHours(h, m, 0, 0);
@@ -842,11 +1096,11 @@ async function calcRoute() {
   try {
     const service = new google.maps.DirectionsService();
     const result  = await service.route({
-      origin:              start,
-      destination:         start,
-      waypoints:           selected.map(p => ({ location: p.address, stopover: true })),
-      optimizeWaypoints:   true,
-      travelMode:          google.maps.TravelMode.DRIVING,
+      origin:            start,
+      destination:       start,
+      waypoints:         selected.map(p => ({ location: p.address, stopover: true })),
+      optimizeWaypoints: true,
+      travelMode:        google.maps.TravelMode.DRIVING,
       drivingOptions: {
         departureTime: depTime,
         trafficModel:  google.maps.TrafficModel.BEST_GUESS,
@@ -865,20 +1119,17 @@ async function calcRoute() {
 function displayRoute(result, props, start) {
   gRenderer.setDirections(result);
 
-  const route  = result.routes[0];
-  const order  = route.waypoint_order;
-  const legs   = route.legs;
+  const route = result.routes[0];
+  const order = route.waypoint_order;
+  const legs  = route.legs;
 
-  // 合計時間
   const totalMins = Math.round(
     legs.reduce((s, l) => s + (l.duration_in_traffic?.value ?? l.duration.value), 0) / 60
   );
   document.getElementById('route-total').textContent = `合計 約${totalMins}分`;
 
-  // Googleマップ用URL保存
   gRouteWaypoints = [start, ...order.map(i => props[i].address)];
 
-  // 訪問順リスト
   document.getElementById('route-order-list').innerHTML = order.map((propIdx, legIdx) => {
     const p    = props[propIdx];
     const leg  = legs[legIdx];
@@ -901,7 +1152,6 @@ function displayRoute(result, props, start) {
   }).join('');
 
   document.getElementById('route-result').classList.remove('hidden');
-  // 地図を表示してリサイズ（非表示状態だとサイズ計算がずれるため）
   google.maps.event.trigger(gMap, 'resize');
   document.getElementById('map').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -920,9 +1170,9 @@ function toggleRouteLock(id) {
 
 function openInMaps() {
   if (gRouteWaypoints.length < 2) return;
-  const origin  = encodeURIComponent(gRouteWaypoints[0]);
-  const dest    = encodeURIComponent(gRouteWaypoints[gRouteWaypoints.length - 1]);
-  const waypts  = gRouteWaypoints.slice(1, -1).map(w => encodeURIComponent(w)).join('|');
+  const origin = encodeURIComponent(gRouteWaypoints[0]);
+  const dest   = encodeURIComponent(gRouteWaypoints[gRouteWaypoints.length - 1]);
+  const waypts = gRouteWaypoints.slice(1, -1).map(w => encodeURIComponent(w)).join('|');
   window.open(
     `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}&waypoints=${waypts}&travelmode=driving`,
     '_blank'
@@ -942,7 +1192,6 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     if (btn.dataset.screen === 'properties') renderProperties();
     if (btn.dataset.screen === 'route') {
       renderRoutePropList();
-      // スタッフの出発地点を自動セット
       const me = state.staff.find(s => s.name === state.currentUser);
       if (me?.defaultStart) document.getElementById('route-start').value = me.defaultStart;
     }
@@ -950,9 +1199,16 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
 });
 
 // ══════════════════════════════════════════════════════
-// ファイル入力イベント（onchangeをJSで設定）
+// ファイル入力
 // ══════════════════════════════════════════════════════
 document.getElementById('file-input').addEventListener('change', previewImport);
+
+// 写真ファイル選択時のイベント（選択後すぐアップロード開始）
+document.getElementById('photo-file-input').addEventListener('change', e => {
+  const file = e.target.files[0];
+  e.target.value = ''; // 同じファイルを再選択できるようリセット
+  if (file) uploadPhoto(file);
+});
 
 // ══════════════════════════════════════════════════════
 // 起動
