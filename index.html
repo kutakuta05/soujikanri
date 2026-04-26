@@ -170,6 +170,9 @@
         <div id="progress-bar" class="bg-emerald-500 h-2.5 rounded-full transition-all duration-500" style="width:0%"></div>
       </div>
     </div>
+    <input id="home-search" type="text" placeholder="物件名・住所で検索..."
+      oninput="renderHome()"
+      class="w-full border border-gray-200 rounded-xl px-4 py-3 mb-3 focus:outline-none focus:border-emerald-400" />
     <div id="home-list" class="space-y-2"></div>
     <div id="home-empty" class="hidden mt-20 text-center text-gray-300">
       <p class="text-5xl mb-4">📋</p>
@@ -440,25 +443,34 @@ function setupPropertiesListener() {
 function renderHome() {
   const list  = document.getElementById('home-list');
   const empty = document.getElementById('home-empty');
-  const ps    = state.properties;
+  const all   = state.properties;
 
   const mon = new Date(getMonday() + 'T00:00:00');
   const sun = new Date(mon); sun.setDate(sun.getDate() + 6);
   document.getElementById('week-label').textContent =
     `${mon.getMonth()+1}/${mon.getDate()}（月）〜 ${sun.getMonth()+1}/${sun.getDate()}（日）`;
 
-  const total = ps.reduce((s, p) => s + (p.weeklyVisits || 1), 0);
-  const done  = ps.reduce((s, p) => s + Math.min(p.visitedCount || 0, p.weeklyVisits || 1), 0);
+  // 進捗バーは検索に関係なく全件で計算
+  const total = all.reduce((s, p) => s + (p.weeklyVisits || 1), 0);
+  const done  = all.reduce((s, p) => s + Math.min(p.visitedCount || 0, p.weeklyVisits || 1), 0);
   document.getElementById('progress-text').textContent = `${done} / ${total} 件完了`;
   document.getElementById('progress-bar').style.width = total > 0 ? `${Math.round(done/total*100)}%` : '0%';
 
-  if (ps.length === 0) {
+  // 検索ワードでリストをフィルタリング
+  const q  = (document.getElementById('home-search')?.value || '').toLowerCase();
+  const ps = q
+    ? all.filter(p => p.name.toLowerCase().includes(q) || (p.address||'').toLowerCase().includes(q))
+    : all;
+
+  if (all.length === 0) {
     empty.classList.remove('hidden');
     list.innerHTML = '';
     return;
   }
   empty.classList.add('hidden');
-  list.innerHTML = ps.map(p => propCard(p)).join('');
+  list.innerHTML = ps.length > 0
+    ? ps.map(p => propCard(p)).join('')
+    : '<p class="text-center text-gray-300 text-sm mt-10">該当する物件がありません</p>';
 }
 
 // ══════════════════════════════════════════════════════
