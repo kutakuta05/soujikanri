@@ -1,0 +1,3 @@
+# 秘密情報。.env は実値、config.js は .env から生成された実値を含む
+.env
+config.js

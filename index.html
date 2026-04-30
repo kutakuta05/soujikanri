@@ -12,7 +12,21 @@
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
   <!-- Firebase Storage: 画像ファイルをクラウドに保存するためのSDK -->
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
-  <script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDD0Dl4j3UAbO6MUF5eAoTfeosL0NaVnbk&callback=initMap&language=ja"></script>
+  <!-- 設定値（APIキー等）は config.js から読み込む。config.js は .env から生成する（gitignored） -->
+  <script src="config.js"></script>
+  <script>
+    // Google Maps を APP_CONFIG のキーで動的にロード
+    (function () {
+      if (!window.APP_CONFIG || !window.APP_CONFIG.googleMapsApiKey) {
+        console.error('config.js が読み込まれていません。.env を確認し generate-config.ps1 を実行してください。');
+        return;
+      }
+      const s = document.createElement('script');
+      s.async = true;
+      s.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(window.APP_CONFIG.googleMapsApiKey) + '&callback=initMap&language=ja';
+      document.head.appendChild(s);
+    })();
+  </script>
   <style>
     * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
     body { font-family: -apple-system, 'Hiragino Sans', 'Meiryo', sans-serif; overscroll-behavior: none; -webkit-overflow-scrolling: touch; }
@@ -365,14 +379,10 @@
 // ══════════════════════════════════════════════════════
 // Firebase 初期化
 // ══════════════════════════════════════════════════════
-firebase.initializeApp({
-  apiKey: "AIzaSyD-VbV7tWNfVDnGdXuR8f8hbQTlB2LI2pI",
-  authDomain: "soujikanri-b6ee9.firebaseapp.com",
-  projectId: "soujikanri-b6ee9",
-  storageBucket: "soujikanri-b6ee9.firebasestorage.app",
-  messagingSenderId: "853246001624",
-  appId: "1:853246001624:web:edfe70cc1d98d10f2fb2ad"
-});
+if (!window.APP_CONFIG || !window.APP_CONFIG.firebase) {
+  throw new Error('config.js が読み込まれていません。.env を確認し generate-config.ps1 を実行してください。');
+}
+firebase.initializeApp(window.APP_CONFIG.firebase);
 // Firestore: テキストデータ（物件情報・メモ・写真メタデータ）の保存先
 const db = firebase.firestore();
 
