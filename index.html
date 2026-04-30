@@ -9,6 +9,7 @@
   <title>掃除案件管理</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
   <!-- Firebase Storage: 画像ファイルをクラウドに保存するためのSDK -->
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
@@ -389,6 +390,16 @@ const db = firebase.firestore();
 // Storage: 画像ファイルそのものの保存先（Firestoreとは別サービス）
 // ※ Firebase Consoleの「Storage」でセキュリティルールの設定が別途必要
 const storage = firebase.storage();
+
+// 匿名認証：セキュリティルールで request.auth != null を要求するため必須
+const auth = firebase.auth();
+let appStarted = false;
+auth.onAuthStateChanged((user) => {
+  if (user && !appStarted) {
+    appStarted = true;
+    initApp();
+  }
+});
 
 // ══════════════════════════════════════════════════════
 // 状態管理
@@ -1287,9 +1298,12 @@ document.getElementById('photo-file-input').addEventListener('change', e => {
 });
 
 // ══════════════════════════════════════════════════════
-// 起動
+// 起動：匿名サインイン → onAuthStateChanged で initApp() が呼ばれる
 // ══════════════════════════════════════════════════════
-initApp();
+auth.signInAnonymously().catch((err) => {
+  console.error('匿名認証に失敗:', err);
+  alert('Firebase の認証に失敗しました。\n\nFirebase Console → Authentication → Sign-in method で「匿名」を有効化してください。\n\n詳細: ' + err.message);
+});
 </script>
 </body>
 </html>
