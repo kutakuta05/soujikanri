@@ -1,3 +1,5 @@
-# 秘密情報。.env は実値、config.js は .env から生成された実値を含む
+# .env は実値（source of truth）。commitしない
 .env
-config.js
+
+# config.js は .env から生成される。GitHub Pagesに載せる必要があるため commit する。
+# キーの実防御は GCP/Firebase 側のドメイン制限とSecurity Rules で行うこと。
