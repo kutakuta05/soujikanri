@@ -133,6 +133,14 @@
         <span class="text-gray-400 w-14 shrink-0">ゴミ</span>
         <span id="detail-gomi" class="text-gray-700"></span>
       </div>
+      <div id="row-client" class="hidden flex gap-3">
+        <span class="text-gray-400 w-14 shrink-0">委託元</span>
+        <span id="detail-client" class="text-gray-700"></span>
+      </div>
+      <div id="row-note" class="hidden flex gap-3">
+        <span class="text-gray-400 w-14 shrink-0">備考</span>
+        <span id="detail-note" class="text-gray-700 whitespace-pre-wrap break-words"></span>
+      </div>
     </div>
 
     <div id="lock-section" class="hidden bg-amber-50 rounded-2xl p-4">
@@ -183,7 +191,7 @@
 </header>
 
 <!-- メインコンテンツ -->
-<main id="scroll" class="overflow-y-auto px-4 pt-4"
+<main id="scroll" class="overflow-y-auto px-4 pt-4 max-w-screen-xl mx-auto"
       style="padding-bottom: calc(72px + max(env(safe-area-inset-bottom), 8px) + 16px);">
 
   <!-- ① ホーム -->
@@ -201,10 +209,25 @@
         <div id="progress-bar" class="bg-emerald-500 h-2.5 rounded-full transition-all duration-500" style="width:0%"></div>
       </div>
     </div>
-    <input id="home-search" type="text" placeholder="物件名・住所で検索..."
+    <input id="home-search" type="text" placeholder="物件名・住所・委託元・備考で検索..."
       oninput="renderHome()"
       class="w-full border border-gray-200 rounded-xl px-4 py-3 mb-3 focus:outline-none focus:border-emerald-400" />
-    <div id="home-list" class="space-y-2"></div>
+    <div class="flex gap-2 mb-3">
+      <select id="home-sort" onchange="onHomeViewChange()"
+        class="flex-1 border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-emerald-400">
+        <option value="default">並び順：物件名（あいうえお）</option>
+        <option value="address">並び順：住所</option>
+        <option value="unvisited">並び順：未訪問優先</option>
+        <option value="visits">並び順：巡回頻度（週2優先）</option>
+      </select>
+      <select id="home-group" onchange="onHomeViewChange()"
+        class="flex-1 border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:outline-none focus:border-emerald-400">
+        <option value="none">グループ化：なし</option>
+        <option value="area">グループ化：エリア</option>
+        <option value="client">グループ化：委託元</option>
+      </select>
+    </div>
+    <div id="home-list" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2"></div>
     <div id="home-empty" class="hidden mt-20 text-center text-gray-300">
       <p class="text-5xl mb-4">📋</p>
       <p class="text-sm leading-relaxed">今週の案件がありません。<br/>「インポート」からExcelを読み込もう！</p>
@@ -235,6 +258,8 @@
         <p>C列 — 巡回頻度（週1回 / 週2回 など）</p>
         <p>D列 — ゴミ（任意）</p>
         <p>E列 — オートロック番号（任意）</p>
+        <p>F列 — 委託元（任意）</p>
+        <p>G列 — 備考（任意）</p>
       </div>
     </div>
 
@@ -482,6 +507,7 @@ function formatTs(ts) {
 // アプリ起動
 // ══════════════════════════════════════════════════════
 async function initApp() {
+  loadHomeViewPrefs();
   await loadStaff();
   await finalizeInit();
 }
@@ -517,6 +543,50 @@ function setupPropertiesListener() {
 // ══════════════════════════════════════════════════════
 // ホーム画面
 // ══════════════════════════════════════════════════════
+// 住所文字列から市区町村を抽出（政令市は「市＋区」を1単位に保持）
+function extractArea(address) {
+  if (!address) return '未設定';
+  const m1 = address.match(/^(?:.+?[都道府県])?(.+?市.+?区)/);
+  if (m1) return m1[1];
+  const m2 = address.match(/^(?:.+?[都道府県])?(.+?[市区町村])/);
+  if (m2) return m2[1];
+  return '未設定';
+}
+
+function loadHomeViewPrefs() {
+  const sortEl  = document.getElementById('home-sort');
+  const groupEl = document.getElementById('home-group');
+  if (sortEl)  sortEl.value  = localStorage.getItem('homeSort')  || 'default';
+  if (groupEl) groupEl.value = localStorage.getItem('homeGroup') || 'none';
+}
+
+function onHomeViewChange() {
+  const sortEl  = document.getElementById('home-sort');
+  const groupEl = document.getElementById('home-group');
+  if (sortEl)  localStorage.setItem('homeSort',  sortEl.value);
+  if (groupEl) localStorage.setItem('homeGroup', groupEl.value);
+  renderHome();
+}
+
+function sortProps(arr, mode) {
+  const byName = (a, b) => (a.name || '').localeCompare(b.name || '', 'ja');
+  const copy = arr.slice();
+  if (mode === 'address') {
+    copy.sort((a, b) => (a.address || '').localeCompare(b.address || '', 'ja') || byName(a, b));
+  } else if (mode === 'unvisited') {
+    copy.sort((a, b) => {
+      const ad = ((a.visitedCount || 0) >= (a.weeklyVisits || 1)) ? 1 : 0;
+      const bd = ((b.visitedCount || 0) >= (b.weeklyVisits || 1)) ? 1 : 0;
+      return (ad - bd) || byName(a, b);
+    });
+  } else if (mode === 'visits') {
+    copy.sort((a, b) => ((b.weeklyVisits || 1) - (a.weeklyVisits || 1)) || byName(a, b));
+  } else {
+    copy.sort(byName);
+  }
+  return copy;
+}
+
 function renderHome() {
   const list  = document.getElementById('home-list');
   const empty = document.getElementById('home-empty');
@@ -533,10 +603,14 @@ function renderHome() {
   document.getElementById('progress-text').textContent = `${done} / ${total} 件完了`;
   document.getElementById('progress-bar').style.width = total > 0 ? `${Math.round(done/total*100)}%` : '0%';
 
-  // 検索ワードでリストをフィルタリング
+  // 検索ワードでリストをフィルタリング（物件名/住所/委託元/備考）
   const q  = (document.getElementById('home-search')?.value || '').toLowerCase();
   const ps = q
-    ? all.filter(p => p.name.toLowerCase().includes(q) || (p.address||'').toLowerCase().includes(q))
+    ? all.filter(p =>
+        (p.name || '').toLowerCase().includes(q) ||
+        (p.address || '').toLowerCase().includes(q) ||
+        (p.clientName || '').toLowerCase().includes(q) ||
+        (p.note || '').toLowerCase().includes(q))
     : all;
 
   if (all.length === 0) {
@@ -545,9 +619,47 @@ function renderHome() {
     return;
   }
   empty.classList.add('hidden');
-  list.innerHTML = ps.length > 0
-    ? ps.map(p => propCard(p)).join('')
-    : '<p class="text-center text-gray-300 text-sm mt-10">該当する物件がありません</p>';
+
+  if (ps.length === 0) {
+    list.innerHTML = '<p class="col-span-full text-center text-gray-300 text-sm mt-10">該当する物件がありません</p>';
+    return;
+  }
+
+  const sortMode  = document.getElementById('home-sort')?.value  || 'default';
+  const groupMode = document.getElementById('home-group')?.value || 'none';
+
+  if (groupMode === 'none') {
+    const sorted = sortProps(ps, sortMode);
+    list.innerHTML = sorted.map(p => propCard(p)).join('');
+    return;
+  }
+
+  // グループ化
+  const groupKey = (p) =>
+    groupMode === 'area'   ? extractArea(p.address) :
+    groupMode === 'client' ? (p.clientName || '未設定') :
+    '';
+  const groups = new Map();
+  ps.forEach(p => {
+    const k = groupKey(p) || '未設定';
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(p);
+  });
+  const sortedKeys = Array.from(groups.keys()).sort((a, b) => {
+    if (a === '未設定') return 1;
+    if (b === '未設定') return -1;
+    return a.localeCompare(b, 'ja');
+  });
+
+  list.innerHTML = sortedKeys.map(k => {
+    const items = sortProps(groups.get(k), sortMode);
+    return `
+      <div class="col-span-full mt-2 mb-1 first:mt-0">
+        <p class="text-xs font-bold text-gray-500 px-1">${esc(k)} <span class="text-gray-300 font-normal">（${items.length}件）</span></p>
+      </div>
+      ${items.map(p => propCard(p)).join('')}
+    `;
+  }).join('');
 }
 
 // ══════════════════════════════════════════════════════
@@ -612,6 +724,18 @@ function openDetail(id) {
     rowGomi.classList.remove('hidden');
     document.getElementById('detail-gomi').textContent = p.gomi;
   } else { rowGomi.classList.add('hidden'); }
+
+  const rowClient = document.getElementById('row-client');
+  if (p.clientName) {
+    rowClient.classList.remove('hidden');
+    document.getElementById('detail-client').textContent = p.clientName;
+  } else { rowClient.classList.add('hidden'); }
+
+  const rowNote = document.getElementById('row-note');
+  if (p.note) {
+    rowNote.classList.remove('hidden');
+    document.getElementById('detail-note').textContent = p.note;
+  } else { rowNote.classList.add('hidden'); }
 
   const lockSec = document.getElementById('lock-section');
   if (p.autoLockCode) {
@@ -801,15 +925,19 @@ function previewImport(event) {
         weeklyVisits: String(r[2] || '').includes('2') ? 2 : 1,
         gomi:         String(r[3] || '').trim(),
         autoLockCode: String(r[4] || '').trim(),
+        clientName:   String(r[5] || '').trim(),
+        note:         String(r[6] || '').trim(),
       }));
 
     document.getElementById('preview-count').textContent = state.importData.length;
     document.getElementById('preview-list').innerHTML = state.importData.map(p => `
       <div class="bg-gray-50 rounded-xl px-3 py-2">
-        <div class="flex items-center gap-1.5 mb-0.5">
+        <div class="flex items-center gap-1.5 mb-0.5 flex-wrap">
           <p class="text-sm font-bold text-gray-800">${esc(p.name)}</p>
           ${p.weeklyVisits === 2 ? '<span class="text-xs text-orange-500 font-bold">×2回</span>' : ''}
           ${p.autoLockCode ? '<span class="text-xs text-amber-600">🔒 番号あり</span>' : ''}
+          ${p.clientName ? `<span class="text-xs bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full">${esc(p.clientName)}</span>` : ''}
+          ${p.note ? '<span class="text-xs text-gray-500">📝 備考あり</span>' : ''}
         </div>
         <p class="text-xs text-gray-400">${esc(p.address)}</p>
       </div>`).join('');
