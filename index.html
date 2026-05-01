@@ -46,6 +46,8 @@
     .blur-code.revealed { filter: none; }
     .card-in { animation: cardIn 0.2s ease; }
     @keyframes cardIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+    .unauthed main, .unauthed nav { display: none !important; }
+    #screen-login.flex { display: flex !important; }
   </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -56,18 +58,21 @@
   <p class="text-gray-400 text-sm">読み込み中...</p>
 </div>
 
-<!-- 暗証番号ロック画面 -->
-<div id="modal-pin" class="modal flex-col items-center justify-center bg-gray-50 px-4" style="z-index:100;">
-  <div class="text-5xl mb-4">🔐</div>
-  <h2 class="text-xl font-bold text-gray-800 mb-1">暗証番号を入力</h2>
-  <p class="text-sm text-gray-400 mb-6">物件情報にアクセスするには暗証番号が必要です</p>
-  <input id="pin-input-lock" type="password" inputmode="numeric" maxlength="8"
-    placeholder="暗証番号"
-    class="w-full max-w-xs text-center text-2xl tracking-widest border-2 border-gray-200 rounded-2xl px-4 py-4 mb-3 focus:outline-none focus:border-emerald-400" />
-  <p id="pin-error" class="text-sm text-red-500 mb-4 hidden">暗証番号が違います</p>
-  <button onclick="submitPin()"
+<!-- ログイン画面 -->
+<div id="screen-login" class="fixed inset-0 bg-gray-50 px-4 flex-col items-center justify-center hidden" style="z-index:100; display:none;">
+  <div class="text-5xl mb-4">🧹</div>
+  <h2 class="text-xl font-bold text-gray-800 mb-1">ログイン</h2>
+  <p class="text-sm text-gray-400 mb-6">メールアドレスとパスワードを入力してください</p>
+  <input id="login-email" type="email" inputmode="email" autocomplete="username"
+    placeholder="メールアドレス"
+    class="w-full max-w-xs border-2 border-gray-200 rounded-2xl px-4 py-3 mb-3 focus:outline-none focus:border-emerald-400" />
+  <input id="login-password" type="password" autocomplete="current-password"
+    placeholder="パスワード"
+    class="w-full max-w-xs border-2 border-gray-200 rounded-2xl px-4 py-3 mb-3 focus:outline-none focus:border-emerald-400" />
+  <p id="login-error" class="text-sm text-red-500 mb-4 hidden">メールアドレスまたはパスワードが違います</p>
+  <button onclick="submitLogin()"
     class="tap w-full max-w-xs bg-emerald-500 text-white rounded-2xl py-4 font-bold text-base active:bg-emerald-700">
-    確認
+    ログイン
   </button>
 </div>
 
@@ -270,25 +275,15 @@
       </div>
     </div>
 
-    <!-- 暗証番号 -->
+    <!-- アカウント -->
     <div class="bg-white rounded-2xl shadow-sm p-4 mb-4">
-      <p class="text-sm font-bold text-gray-700 mb-3">🔐 アクセス暗証番号</p>
-      <p id="pin-status" class="text-xs text-gray-400 mb-3">設定なし（誰でも閲覧可能）</p>
-      <div class="space-y-2">
-        <input id="input-pin" type="password" inputmode="numeric" maxlength="8"
-          placeholder="新しい暗証番号（数字4〜8桁）"
-          class="w-full border border-gray-200 rounded-xl px-3 py-3 focus:outline-none focus:border-emerald-400" />
-        <div class="flex gap-2">
-          <button onclick="savePin()"
-            class="tap flex-1 bg-gray-700 text-white rounded-xl py-3 font-bold text-sm active:bg-gray-900">
-            設定する
-          </button>
-          <button onclick="removePin()"
-            class="tap flex-1 bg-gray-100 text-gray-500 rounded-xl py-3 font-bold text-sm active:bg-gray-200">
-            解除する
-          </button>
-        </div>
-      </div>
+      <p class="text-sm font-bold text-gray-700 mb-3">👤 アカウント</p>
+      <p class="text-xs text-gray-400 mb-1">ログイン中</p>
+      <p id="current-user-email" class="text-sm text-gray-700 mb-3 break-all">-</p>
+      <button onclick="doLogout()"
+        class="tap w-full bg-gray-100 text-gray-600 rounded-xl py-3 font-bold text-sm active:bg-gray-200">
+        ログアウト
+      </button>
     </div>
 
     <!-- 全リセット -->
@@ -391,15 +386,64 @@ const db = firebase.firestore();
 // ※ Firebase Consoleの「Storage」でセキュリティルールの設定が別途必要
 const storage = firebase.storage();
 
-// 匿名認証：セキュリティルールで request.auth != null を要求するため必須
+// メール/パスワード認証：未ログイン時はログイン画面を表示する
 const auth = firebase.auth();
 let appStarted = false;
 auth.onAuthStateChanged((user) => {
-  if (user && !appStarted) {
-    appStarted = true;
-    initApp();
+  const loginEl = document.getElementById('screen-login');
+  const loadingEl = document.getElementById('loading');
+  if (user) {
+    // ログイン済み
+    if (loginEl) loginEl.style.display = 'none';
+    document.body.classList.remove('unauthed');
+    const emailEl = document.getElementById('current-user-email');
+    if (emailEl) emailEl.textContent = user.email || '(不明)';
+    if (!appStarted) {
+      appStarted = true;
+      initApp();
+    }
+  } else {
+    // 未ログイン → ログイン画面を表示し、メイン画面を遮断
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (loginEl) loginEl.style.display = 'flex';
+    document.body.classList.add('unauthed');
+    appStarted = false;
   }
 });
+
+async function submitLogin() {
+  const emailEl    = document.getElementById('login-email');
+  const passwordEl = document.getElementById('login-password');
+  const errorEl    = document.getElementById('login-error');
+  const email = emailEl.value.trim();
+  const password = passwordEl.value;
+  if (!email || !password) {
+    errorEl.classList.remove('hidden');
+    return;
+  }
+  errorEl.classList.add('hidden');
+  try {
+    await auth.signInWithEmailAndPassword(email, password);
+    // 成功時：onAuthStateChanged が画面遷移を担当
+    passwordEl.value = '';
+  } catch (err) {
+    console.error('login failed:', err.code);
+    errorEl.classList.remove('hidden');
+    passwordEl.value = '';
+    passwordEl.focus();
+  }
+}
+
+async function doLogout() {
+  if (!confirm('ログアウトしますか？')) return;
+  try {
+    await auth.signOut();
+    sessionStorage.removeItem('pinOk');
+  } catch (err) {
+    console.error('logout failed:', err);
+    alert('ログアウトに失敗しました: ' + err.message);
+  }
+}
 
 // ══════════════════════════════════════════════════════
 // 状態管理
@@ -413,7 +457,6 @@ const state = {
   photoUnsub: null,          // 写真リアルタイムリスナーの解除関数
   checkedRouteProps: new Set(), // ルート画面でチェック済みの物件ID
   importData: [],
-  pin: null,
 };
 
 // ══════════════════════════════════════════════════════
@@ -440,8 +483,6 @@ function formatTs(ts) {
 // ══════════════════════════════════════════════════════
 async function initApp() {
   await loadStaff();
-  const locked = await checkPin();
-  if (locked) return;
   await finalizeInit();
 }
 
@@ -888,73 +929,13 @@ function resetUser() {
 }
 
 // ══════════════════════════════════════════════════════
-// 暗証番号
+// ログイン画面：Enterキーで送信
 // ══════════════════════════════════════════════════════
-async function checkPin() {
-  try {
-    const doc = await db.collection('settings').doc('security').get();
-    if (!doc.exists || !doc.data().pin) {
-      updatePinStatus(false);
-      return false;
-    }
-    state.pin = doc.data().pin;
-    updatePinStatus(true);
-    if (sessionStorage.getItem('pinOk') === 'yes') return false;
-    // ロック画面を表示
-    document.getElementById('loading').style.display = 'none';
-    document.getElementById('modal-pin').classList.add('open');
-    setTimeout(() => document.getElementById('pin-input-lock').focus(), 100);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function updatePinStatus(hasPin) {
-  const el = document.getElementById('pin-status');
-  if (el) el.textContent = hasPin ? '✅ 暗証番号が設定されています' : '設定なし（誰でも閲覧可能）';
-}
-
-async function submitPin() {
-  const input   = document.getElementById('pin-input-lock');
-  const errorEl = document.getElementById('pin-error');
-  if (input.value === state.pin) {
-    sessionStorage.setItem('pinOk', 'yes');
-    document.getElementById('modal-pin').classList.remove('open');
-    errorEl.classList.add('hidden');
-    document.getElementById('loading').style.display = 'flex';
-    await finalizeInit();
-  } else {
-    errorEl.classList.remove('hidden');
-    input.value = '';
-    input.focus();
-  }
-}
-
-async function savePin() {
-  const pin = document.getElementById('input-pin').value.trim();
-  if (!/^\d{4,8}$/.test(pin)) {
-    alert('暗証番号は数字4〜8桁で入力してください。');
-    return;
-  }
-  await db.collection('settings').doc('security').set({ pin });
-  state.pin = pin;
-  document.getElementById('input-pin').value = '';
-  updatePinStatus(true);
-  alert('暗証番号を設定しました。');
-}
-
-async function removePin() {
-  if (!confirm('暗証番号を解除しますか？誰でも閲覧できるようになります。')) return;
-  await db.collection('settings').doc('security').delete();
-  state.pin = null;
-  sessionStorage.removeItem('pinOk');
-  updatePinStatus(false);
-  alert('暗証番号を解除しました。');
-}
-
-document.getElementById('pin-input-lock').addEventListener('keydown', e => {
-  if (e.key === 'Enter') { e.preventDefault(); submitPin(); }
+['login-email', 'login-password'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); submitLogin(); }
+  });
 });
 
 // ══════════════════════════════════════════════════════
@@ -1298,12 +1279,8 @@ document.getElementById('photo-file-input').addEventListener('change', e => {
 });
 
 // ══════════════════════════════════════════════════════
-// 起動：匿名サインイン → onAuthStateChanged で initApp() が呼ばれる
+// 起動：onAuthStateChanged が未ログインを検知してログイン画面を表示する
 // ══════════════════════════════════════════════════════
-auth.signInAnonymously().catch((err) => {
-  console.error('匿名認証に失敗:', err);
-  alert('Firebase の認証に失敗しました。\n\nFirebase Console → Authentication → Sign-in method で「匿名」を有効化してください。\n\n詳細: ' + err.message);
-});
 </script>
 </body>
 </html>
