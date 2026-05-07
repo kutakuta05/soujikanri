@@ -922,7 +922,7 @@ function previewImport(event) {
       .map(r => ({
         name:         String(r[0] || '').trim(),
         address:      String(r[1] || '').trim(),
-        weeklyVisits: String(r[2] || '').includes('2') ? 2 : 1,
+        weeklyVisits: String(r[2] || '').normalize('NFKC').includes('2') ? 2 : 1,
         gomi:         String(r[3] || '').trim(),
         autoLockCode: String(r[4] || '').trim(),
         clientName:   String(r[5] || '').trim(),
