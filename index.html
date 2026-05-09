@@ -504,6 +504,95 @@ function formatTs(ts) {
 }
 
 // ══════════════════════════════════════════════════════
+// 頻度ロジック（月N回・隔週・週3・alternating 対応）
+// ══════════════════════════════════════════════════════
+function parseFrequency(raw) {
+  const s = String(raw || '').normalize('NFKC').replace(/\s/g, '');
+  if (!s) return { type: 'weekly', count: 1 };
+  const dowMatch = s.match(/[(（]([月火水木金土日,、]+)[)）]/);
+  const daysOfWeek = dowMatch ? dowMatch[1].split(/[,、]/) : undefined;
+  const body = s.replace(/[(（].*?[)）]/, '');
+  if (body.includes('隔週')) {
+    const m = body.match(/週(\d)/);
+    return { type: 'biweekly', count: m ? Number(m[1]) : 1, ...(daysOfWeek && { daysOfWeek }) };
+  }
+  let m = body.match(/月(\d+)/);
+  if (m) return { type: 'monthly', count: Number(m[1]), ...(daysOfWeek && { daysOfWeek }) };
+  m = body.match(/週(\d+)/);
+  if (m) return { type: 'weekly', count: Number(m[1]), ...(daysOfWeek && { daysOfWeek }) };
+  return { type: 'weekly', count: 1 };
+}
+
+function getStableId(name) {
+  return 'stable_' + String(name).normalize('NFKC').replace(/\s/g, '').slice(0, 40);
+}
+
+function computeCycleStart(anchorStr, today = new Date()) {
+  const anchor = new Date(anchorStr);
+  const weeksSince = Math.floor((today - anchor) / (7 * 86400000));
+  const cycleNum = Math.floor(weeksSince / 2);
+  const d = new Date(anchor);
+  d.setDate(anchor.getDate() + cycleNum * 14);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function getTargetCount(p, today = new Date()) {
+  const f = p.frequency;
+  if (!f) return p.weeklyVisits || 1;
+  if (f.type === 'alternating') {
+    const anchor = new Date(f.cycleAnchor);
+    const weeksSince = Math.floor((today - anchor) / (7 * 86400000));
+    return weeksSince % 2 === 0 ? (f.counts[0] || 2) : (f.counts[1] || 3);
+  }
+  return f.count || 1;
+}
+
+function getCurrentVisited(p, today = new Date()) {
+  const f = p.frequency;
+  if (!f || f.type === 'weekly') return p.visitedCount || 0;
+  if (f.type === 'monthly') return p.monthlyVisited || 0;
+  const cycleStart = f.type === 'alternating'
+    ? getMonday()
+    : computeCycleStart(f.cycleAnchor || getMonday(), today);
+  if ((p.cycleCurrentStart || '') < cycleStart) return 0;
+  return p.visitedCount || 0;
+}
+
+function isAchieved(p, today = new Date()) {
+  return getCurrentVisited(p, today) >= getTargetCount(p, today);
+}
+
+function getProgressText(p, today = new Date()) {
+  const f = p.frequency;
+  const type = f?.type ?? 'weekly';
+  const target = getTargetCount(p, today);
+  const current = getCurrentVisited(p, today);
+  if (type === 'monthly')    return `今月累計 ${target} 回（${current} 回済み）`;
+  if (type === 'biweekly')   return `今期 ${target} 回（${current} 回済み）`;
+  if (type === 'alternating') return `今週 ${target} 回（${current} 回済み）`;
+  return `今週 ${target} 回（${current} 回済み）`;
+}
+
+function getFrequencyBadge(p, today = new Date()) {
+  const f = p.frequency;
+  if (!f) {
+    return p.weeklyVisits === 2
+      ? '<span class="text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded-full font-bold">週2</span>'
+      : '';
+  }
+  const { type, count } = f;
+  if (type === 'weekly' && count === 1) return '';
+  const labelMap = { weekly: `週${count}`, monthly: `月${count}`, biweekly: '隔週', alternating: '交互' };
+  const colorMap = {
+    weekly:     count >= 3 ? 'bg-red-100 text-red-600' : 'bg-orange-100 text-orange-600',
+    monthly:    'bg-blue-100 text-blue-600',
+    biweekly:   'bg-purple-100 text-purple-600',
+    alternating:'bg-yellow-100 text-yellow-700',
+  };
+  return `<span class="text-xs ${colorMap[type] || 'bg-gray-100 text-gray-600'} px-1.5 py-0.5 rounded-full font-bold">${labelMap[type] || `週${count}`}</span>`;
+}
+
+// ══════════════════════════════════════════════════════
 // アプリ起動
 // ══════════════════════════════════════════════════════
 async function initApp() {
@@ -568,6 +657,27 @@ function onHomeViewChange() {
   renderHome();
 }
 
+function renderMonthlyAlerts(props) {
+  const today = new Date();
+  const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+  const daysLeft = lastDay - today.getDate();
+  const atRisk = props.filter(p => {
+    const f = p.frequency;
+    return f?.type === 'monthly' && daysLeft <= 7 && !isAchieved(p);
+  });
+  if (!atRisk.length) return '';
+  const items = atRisk.map(p =>
+    `<div class="flex items-center gap-2 text-sm text-amber-700">
+       <span>${esc(p.name)}</span>
+       <span class="text-xs">${getCurrentVisited(p)}/${getTargetCount(p)}回</span>
+     </div>`
+  ).join('');
+  return `<div class="col-span-full bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-1">
+    <p class="text-xs font-bold text-amber-700 mb-1.5">⚠️ 今月未達リスク（残${daysLeft}日）</p>
+    ${items}
+  </div>`;
+}
+
 function sortProps(arr, mode) {
   const byName = (a, b) => (a.name || '').localeCompare(b.name || '', 'ja');
   const copy = arr.slice();
@@ -575,12 +685,12 @@ function sortProps(arr, mode) {
     copy.sort((a, b) => (a.address || '').localeCompare(b.address || '', 'ja') || byName(a, b));
   } else if (mode === 'unvisited') {
     copy.sort((a, b) => {
-      const ad = ((a.visitedCount || 0) >= (a.weeklyVisits || 1)) ? 1 : 0;
-      const bd = ((b.visitedCount || 0) >= (b.weeklyVisits || 1)) ? 1 : 0;
+      const ad = isAchieved(a) ? 1 : 0;
+      const bd = isAchieved(b) ? 1 : 0;
       return (ad - bd) || byName(a, b);
     });
   } else if (mode === 'visits') {
-    copy.sort((a, b) => ((b.weeklyVisits || 1) - (a.weeklyVisits || 1)) || byName(a, b));
+    copy.sort((a, b) => (getTargetCount(b) - getTargetCount(a)) || byName(a, b));
   } else {
     copy.sort(byName);
   }
@@ -598,8 +708,8 @@ function renderHome() {
     `${mon.getMonth()+1}/${mon.getDate()}（月）〜 ${sun.getMonth()+1}/${sun.getDate()}（日）`;
 
   // 進捗バーは検索に関係なく全件で計算
-  const total = all.reduce((s, p) => s + (p.weeklyVisits || 1), 0);
-  const done  = all.reduce((s, p) => s + Math.min(p.visitedCount || 0, p.weeklyVisits || 1), 0);
+  const total = all.reduce((s, p) => s + getTargetCount(p), 0);
+  const done  = all.reduce((s, p) => s + Math.min(getCurrentVisited(p), getTargetCount(p)), 0);
   document.getElementById('progress-text').textContent = `${done} / ${total} 件完了`;
   document.getElementById('progress-bar').style.width = total > 0 ? `${Math.round(done/total*100)}%` : '0%';
 
@@ -630,7 +740,7 @@ function renderHome() {
 
   if (groupMode === 'none') {
     const sorted = sortProps(ps, sortMode);
-    list.innerHTML = sorted.map(p => propCard(p)).join('');
+    list.innerHTML = renderMonthlyAlerts(all) + sorted.map(p => propCard(p)).join('');
     return;
   }
 
@@ -651,7 +761,7 @@ function renderHome() {
     return a.localeCompare(b, 'ja');
   });
 
-  list.innerHTML = sortedKeys.map(k => {
+  list.innerHTML = renderMonthlyAlerts(all) + sortedKeys.map(k => {
     const items = sortProps(groups.get(k), sortMode);
     return `
       <div class="col-span-full mt-2 mb-1 first:mt-0">
@@ -683,14 +793,14 @@ function renderProperties() {
 }
 
 function propCard(p) {
-  const visited = (p.visitedCount || 0) >= (p.weeklyVisits || 1);
+  const visited = isAchieved(p);
   return `
     <div onclick="openDetail('${p.id}')"
          class="card-in tap bg-white rounded-2xl shadow-sm px-4 py-4 flex items-center gap-3 ${visited ? 'opacity-50' : ''}">
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-1.5 flex-wrap mb-0.5">
           <p class="font-bold text-gray-800 text-sm">${p.autoLockCode ? '🔒 ' : ''}${esc(p.name)}</p>
-          ${p.weeklyVisits === 2 ? '<span class="text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded-full font-bold">×2</span>' : ''}
+          ${getFrequencyBadge(p)}
           ${visited ? '<span class="text-xs bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded-full font-bold">完了</span>' : ''}
         </div>
         <p class="text-xs text-gray-400 truncate">${esc(p.address)}</p>
@@ -710,8 +820,7 @@ function openDetail(id) {
 
   document.getElementById('detail-name').textContent    = p.name;
   document.getElementById('detail-address').textContent = p.address || '—';
-  document.getElementById('detail-visits').textContent  =
-    `今週 ${p.weeklyVisits || 1} 回（${p.visitedCount || 0} 回済み）`;
+  document.getElementById('detail-visits').textContent  = getProgressText(p);
 
   const rowFixed = document.getElementById('row-fixed');
   if (p.fixedSchedule) {
@@ -786,8 +895,8 @@ function closeDetail() {
 
 function refreshVisitedBtn(p) {
   const btn     = document.getElementById('btn-visited');
-  const total   = p.weeklyVisits || 1;
-  const current = p.visitedCount || 0;
+  const total   = getTargetCount(p);
+  const current = getCurrentVisited(p);
   const done    = current >= total;
 
   if (done) {
@@ -820,15 +929,31 @@ async function toggleVisited() {
   btn.disabled    = true;
 
   try {
-    const max     = p.weeklyVisits || 1;
-    const current = p.visitedCount || 0;
-    const next    = current >= max ? 0 : current + 1;
-    await db.collection('properties').doc(state.detailId).update({ visitedCount: next });
-    p.visitedCount = next;
+    const today = new Date();
+    const f = p.frequency;
+    const type = f?.type ?? 'weekly';
+    const target = getTargetCount(p, today);
+    const current = getCurrentVisited(p, today);
+    const next = current >= target ? 0 : current + 1;
+
+    let updates = {};
+    if (type === 'monthly') {
+      updates.monthlyVisited = next;
+    } else if (type === 'biweekly' || type === 'alternating') {
+      const cycleStart = type === 'alternating'
+        ? getMonday()
+        : computeCycleStart(f.cycleAnchor || getMonday(), today);
+      updates.visitedCount = next;
+      updates.cycleCurrentStart = cycleStart;
+      if (!f.cycleAnchor) updates['frequency.cycleAnchor'] = today.toISOString().slice(0, 10);
+    } else {
+      updates.visitedCount = next;
+    }
+
+    await db.collection('properties').doc(state.detailId).update(updates);
+    Object.assign(p, updates);
     refreshVisitedBtn(p);
-    // detail-visits テキストもその場で更新（onSnapshotを待たず即反映）
-    document.getElementById('detail-visits').textContent =
-      `今週 ${p.weeklyVisits || 1} 回（${next} 回済み）`;
+    document.getElementById('detail-visits').textContent = getProgressText(p);
   } catch (err) {
     console.error(err);
     alert('更新に失敗しました。通信状況を確認してください。');
@@ -922,7 +1047,8 @@ function previewImport(event) {
       .map(r => ({
         name:         String(r[0] || '').trim(),
         address:      String(r[1] || '').trim(),
-        weeklyVisits: String(r[2] || '').normalize('NFKC').includes('2') ? 2 : 1,
+        frequency:    parseFrequency(r[2]),
+        weeklyVisits: parseFrequency(r[2]).count,
         gomi:         String(r[3] || '').trim(),
         autoLockCode: String(r[4] || '').trim(),
         clientName:   String(r[5] || '').trim(),
@@ -934,7 +1060,7 @@ function previewImport(event) {
       <div class="bg-gray-50 rounded-xl px-3 py-2">
         <div class="flex items-center gap-1.5 mb-0.5 flex-wrap">
           <p class="text-sm font-bold text-gray-800">${esc(p.name)}</p>
-          ${p.weeklyVisits === 2 ? '<span class="text-xs text-orange-500 font-bold">×2回</span>' : ''}
+          ${getFrequencyBadge(p)}
           ${p.autoLockCode ? '<span class="text-xs text-amber-600">🔒 番号あり</span>' : ''}
           ${p.clientName ? `<span class="text-xs bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full">${esc(p.clientName)}</span>` : ''}
           ${p.note ? '<span class="text-xs text-gray-500">📝 備考あり</span>' : ''}
@@ -960,16 +1086,33 @@ async function executeImport() {
 
   const batch    = db.batch();
   const existing = await db.collection('properties').where('weekOf', '==', weekOf).get();
-  existing.docs.forEach(d => batch.delete(d.ref));
+
+  const importedStableIds = new Set(
+    state.importData
+      .filter(p => (p.frequency?.type ?? 'weekly') !== 'weekly')
+      .map(p => getStableId(p.name))
+  );
+  existing.docs.forEach(d => {
+    if (d.id.startsWith('stable_') && importedStableIds.has(d.id)) return;
+    batch.delete(d.ref);
+  });
 
   state.importData.forEach(p => {
-    const ref = db.collection('properties').doc();
-    batch.set(ref, {
+    const isWeekly = (p.frequency?.type ?? 'weekly') === 'weekly';
+    const ref = isWeekly
+      ? db.collection('properties').doc()
+      : db.collection('properties').doc(getStableId(p.name));
+    const data = {
       ...p,
       weekOf,
-      visitedCount: 0,
+      ...(isWeekly ? { visitedCount: 0 } : {}),
       createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-    });
+    };
+    if (isWeekly) {
+      batch.set(ref, data);
+    } else {
+      batch.set(ref, data, { merge: true });
+    }
   });
 
   await batch.commit();
