@@ -232,6 +232,7 @@
       <p class="text-5xl mb-4">📋</p>
       <p class="text-sm leading-relaxed">今週の案件がありません。<br/>「インポート」からExcelを読み込もう！</p>
     </div>
+    <p id="app-version" class="mt-6 text-right text-xs text-gray-300"></p>
   </div>
 
   <!-- ② 物件リスト -->
@@ -489,12 +490,73 @@ const state = {
 // ══════════════════════════════════════════════════════
 const esc = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';
 
+// アプリバージョン
+const APP_VERSION = 'v1.4.0';
+
 function getMonday() {
   const d = new Date();
   const day = d.getDay();
   const diff = day === 0 ? -6 : 1 - day;
   d.setDate(d.getDate() + diff);
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+// 今週月曜から weeksAgo 週前の月曜日を YYYY-MM-DD 形式で返す
+function getPastMonday(weeksAgo) {
+  const d = new Date(getMonday() + 'T00:00:00');
+  d.setDate(d.getDate() - weeksAgo * 7);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+// ══════════════════════════════════════════════════════
+// 月曜越え自動繰り越し（v1.4.0）
+// 今週分が0件のとき、過去4週間を遡って先週分を今週に移す
+// ══════════════════════════════════════════════════════
+async function carryOverIfNeeded() {
+  const currentWeek = getMonday();
+
+  // 今週分の件数を確認
+  const currentSnap = await db.collection('properties')
+    .where('weekOf', '==', currentWeek).get();
+  if (!currentSnap.empty) return; // 既にデータあり、何もしない
+
+  // 過去4週間を遡って先週分を探す
+  for (let weeksAgo = 1; weeksAgo <= 4; weeksAgo++) {
+    const pastWeek = getPastMonday(weeksAgo);
+
+    const pastSnap = await db.collection('properties')
+      .where('weekOf', '==', pastWeek).get();
+
+    if (!pastSnap.empty) {
+      // 見つかった → 今週に繰り越し
+      console.log(`[carryOver] ${pastWeek} → ${currentWeek} に ${pastSnap.size} 件を繰り越します`);
+
+      const docs = pastSnap.docs;
+
+      // weekOf を今週に一括更新（100件バッチ上限対応）
+      for (let i = 0; i < docs.length; i += 100) {
+        const batch = db.batch();
+        docs.slice(i, i + 100).forEach(d => batch.update(d.ref, { weekOf: currentWeek }));
+        await batch.commit();
+      }
+
+      // weekly物件（stable_ プレフィックスなし）は visitedCount を0リセット
+      // stable_ プレフィックス付きの非weekly物件（月N回・隔週）は weekOf 更新のみ
+      const weeklyDocs = docs.filter(d => !d.id.startsWith('stable_'));
+      if (weeklyDocs.length > 0) {
+        for (let i = 0; i < weeklyDocs.length; i += 100) {
+          const batch = db.batch();
+          weeklyDocs.slice(i, i + 100).forEach(d => batch.update(d.ref, { visitedCount: 0 }));
+          await batch.commit();
+        }
+      }
+
+      console.log(`[carryOver] 繰り越し完了（weekly:${weeklyDocs.length}件リセット、stable:${docs.length - weeklyDocs.length}件はそのまま）`);
+      return; // 繰り越し完了
+    }
+  }
+
+  console.log('[carryOver] 過去4週間に繰り越し対象なし。新規CSVをインポートしてください');
 }
 
 function formatTs(ts) {
@@ -602,6 +664,7 @@ async function initApp() {
 }
 
 async function finalizeInit() {
+  await carryOverIfNeeded(); // 月曜越え時に先週分を今週に自動繰り越し（v1.4.0）
   setupPropertiesListener();
   if (state.currentUser) {
     document.getElementById('btn-user').textContent = state.currentUser;
@@ -1548,6 +1611,14 @@ document.getElementById('photo-file-input').addEventListener('change', e => {
   e.target.value = ''; // 同じファイルを再選択できるようリセット
   if (file) uploadPhoto(file);
 });
+
+// ══════════════════════════════════════════════════════
+// バージョン表示（v1.4.0）
+// ══════════════════════════════════════════════════════
+(function() {
+  const el = document.getElementById('app-version');
+  if (el) el.textContent = APP_VERSION;
+})();
 
 // ══════════════════════════════════════════════════════
 // 起動：onAuthStateChanged が未ログインを検知してログイン画面を表示する
