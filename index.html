@@ -491,7 +491,7 @@ const state = {
 const esc = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';
 
 // アプリバージョン
-const APP_VERSION = 'v1.4.0';
+const APP_VERSION = 'v1.4.1';
 
 function getMonday() {
   const d = new Date();
@@ -1109,7 +1109,8 @@ function previewImport(event) {
       .filter(r => String(r[0] || '').trim() && String(r[1] || '').trim())
       .map(r => ({
         name:         String(r[0] || '').trim(),
-        address:      String(r[1] || '').trim(),
+        // 住所のダッシュ系文字を半角ハイフンに統一（U+2212/U+2015/U+FF0D/U+2014/U+2013 がフォント未対応で消失する事例があるため）
+        address:      String(r[1] || '').trim().replace(/[−―－—–]/g, '-'),
         frequency:    parseFrequency(r[2]),
         weeklyVisits: parseFrequency(r[2]).count,
         gomi:         String(r[3] || '').trim(),
